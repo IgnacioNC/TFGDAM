@@ -1,54 +1,31 @@
 function ModulesView({
   busy,
   isAuthenticated,
-  newModule,
-  setNewModule,
-  onCreateModule,
+  modules,
   onDeleteModule,
   selectedModuleId,
   setSelectedModuleId,
 }) {
+  const availableModules = Array.isArray(modules) ? modules : []
+
   return (
     <section className="panel">
       <h2>Modulos</h2>
-      <form className="grid two" onSubmit={onCreateModule}>
-        <label>
-          Nombre modulo
-          <input
-            value={newModule.name}
-            onChange={(e) => setNewModule((p) => ({ ...p, name: e.target.value }))}
-            required
-          />
-        </label>
-        <label>
-          Curso academico
-          <input
-            value={newModule.academicYear}
-            onChange={(e) => setNewModule((p) => ({ ...p, academicYear: e.target.value }))}
-            required
-          />
-        </label>
-        <label>
-          Docente
-          <input
-            value={newModule.teacherName}
-            onChange={(e) => setNewModule((p) => ({ ...p, teacherName: e.target.value }))}
-            required
-          />
-        </label>
-        <button type="submit" disabled={busy || !isAuthenticated}>
-          Crear modulo
-        </button>
-      </form>
-
       <div className="inline-actions">
         <label>
-          Modulo activo (ID)
-          <input
+          Modulo a eliminar
+          <select
             value={selectedModuleId}
             onChange={(e) => setSelectedModuleId(e.target.value)}
-            placeholder="Ej: 1"
-          />
+            disabled={busy || !isAuthenticated || !availableModules.length}
+          >
+            <option value="">Selecciona modulo...</option>
+            {availableModules.map((moduleItem) => (
+              <option key={moduleItem.id} value={String(moduleItem.id)}>
+                #{moduleItem.id} - {moduleItem.name || 'Sin nombre'} ({moduleItem.academicYear || '-'})
+              </option>
+            ))}
+          </select>
         </label>
         <button
           type="button"
@@ -58,6 +35,7 @@ function ModulesView({
           Eliminar modulo
         </button>
       </div>
+      {!availableModules.length && <p>No hay modulos creados todavia.</p>}
     </section>
   )
 }

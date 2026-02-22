@@ -36,6 +36,7 @@ function parseInputNumber(raw) {
 function PreviewView({
   busy,
   isAuthenticated,
+  modules,
   moduleId,
   setModuleId,
   previewData,
@@ -43,14 +44,21 @@ function PreviewView({
   finalReport,
   onLoadPreview,
   onDownloadExcel,
-  onDownloadBaseTemplate,
-  onDownloadFilledTemplate,
+  onDownloadTemplate,
   onSaveGrades,
 }) {
   const [activeTab, setActiveTab] = useState(TABS.ras)
   const [exerciseEdits, setExerciseEdits] = useState({})
   const [exerciseStudentId, setExerciseStudentId] = useState('')
   const [exerciseInstrumentId, setExerciseInstrumentId] = useState('')
+  const [templateDownloadOption, setTemplateDownloadOption] = useState('base')
+  const availableModules = useMemo(
+    () =>
+      [...(Array.isArray(modules) ? modules : [])].sort((a, b) => {
+        return (toNumber(a.id) || 0) - (toNumber(b.id) || 0)
+      }),
+    [modules],
+  )
 
   const ras = previewData?.ras || []
   const uts = previewData?.uts || []
@@ -335,22 +343,49 @@ function PreviewView({
       <h2>Vista previa Excel por modulo</h2>
       <form className="inline-actions" onSubmit={onLoadPreview}>
         <label>
-          Modulo (ID)
-          <input value={moduleId} onChange={(e) => setModuleId(e.target.value)} placeholder="Ej: 1" required />
+          Modulo
+          <select
+            value={moduleId}
+            onChange={(e) => setModuleId(e.target.value)}
+            disabled={busy || !isAuthenticated || !availableModules.length}
+            required
+          >
+            <option value="">Selecciona modulo...</option>
+            {availableModules.map((moduleItem) => (
+              <option key={moduleItem.id} value={String(moduleItem.id)}>
+                #{moduleItem.id} - {moduleItem.name || 'Sin nombre'} ({moduleItem.academicYear || '-'})
+              </option>
+            ))}
+          </select>
         </label>
-        <button type="submit" disabled={busy || !isAuthenticated}>
+        <button type="submit" disabled={busy || !isAuthenticated || !String(moduleId || '').trim()}>
           Cargar vista previa
         </button>
         <button type="button" onClick={onDownloadExcel} disabled={busy || !isAuthenticated || !String(moduleId || '').trim()}>
           Descargar Excel
         </button>
-        <button type="button" onClick={onDownloadBaseTemplate} disabled={busy || !isAuthenticated}>
-          Descargar plantilla base
-        </button>
-        <button type="button" onClick={onDownloadFilledTemplate} disabled={busy || !isAuthenticated}>
-          Descargar plantilla rellenada
+        <label className="template-variant-select">
+          Plantilla
+          <select
+            value={templateDownloadOption}
+            onChange={(e) => setTemplateDownloadOption(e.target.value)}
+            disabled={busy || !isAuthenticated}
+          >
+            <option value="base">Base vacia</option>
+            <option value="filled1">Rellenada 1</option>
+            <option value="filled2">Rellenada 2</option>
+          </select>
+        </label>
+        <button
+          type="button"
+          onClick={() => onDownloadTemplate(templateDownloadOption)}
+          disabled={busy || !isAuthenticated}
+        >
+          Descargar plantilla
         </button>
       </form>
+
+      {!availableModules.length && <p>No hay modulos creados todavia.</p>}
 
       {previewData && (
         <div className="report-wrap">
