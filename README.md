@@ -33,10 +33,13 @@ export SPRING_DATASOURCE_PASSWORD=''
 
 Si la base esta vacia, se insertan datos demo automaticamente con `CommandLineRunner`.
 
+Todas las rutas, salvo `POST /auth/login`, requieren `Authorization: Bearer <token>`.
+
 ## Endpoints principales
 
 ### Configuracion
 
+- `GET /modules` (lista modulos accesibles para el usuario autenticado)
 - `POST /teachers`
 - `POST /modules`
 - `POST /modules/{id}/ras`
@@ -79,7 +82,7 @@ Si la base esta vacia, se insertan datos demo automaticamente con `CommandLineRu
 - `GET /modules/{id}/reports/final`
 - `GET /modules/{id}/export/excel` (descarga `.xlsx` rellenado desde plantilla oficial usando script Python)
 - `GET /modules/export/template/base` (descarga plantilla base vacia)
-- `GET /modules/export/template/filled` (descarga plantilla rellenada de referencia)
+- `GET /modules/export/template/filled?variant=1|2` (descarga plantilla rellenada de referencia)
 
 ### Auth y usuarios
 
@@ -90,6 +93,13 @@ Si la base esta vacia, se insertan datos demo automaticamente con `CommandLineRu
 - `PATCH /users/{id}/roles` (solo SUPERADMIN)
 - `GET /users` (SUPERADMIN y DIRECTOR)
 - `GET /users/me` (autenticado)
+
+### Aislamiento de modulos por usuario
+
+- `ROLE_SUPERADMIN` puede ver y operar sobre todos los modulos.
+- `ROLE_DIRECTOR` y `ROLE_TEACHER` solo pueden ver y operar sobre los modulos que les pertenecen (owner).
+- `POST /modules` asigna automaticamente como owner al usuario autenticado que crea el modulo.
+- Este filtro aplica en `GET /modules` y en las operaciones por `moduleId` (preview, reportes, import, export, borrado, etc).
 
 ## Ejemplos curl
 
@@ -255,7 +265,7 @@ Notas sobre importacion desde plantilla:
 - Si existe la hoja `Evaluaciones`, tambien se importan los valores de evaluacion por alumno (`nota numerica`, `boletin sugerido`, `RAs superados`) como overrides por evaluacion.
 - En `GET /modules/{id}/reports/evaluation/{n}`, si hay override para alumno+evaluacion se muestra ese valor; si no, se usa el calculo dinamico.
 - Al importar por `POST /imports/excel-file`, se guarda una copia del `.xlsx` original por modulo en `storage/imports-ra/module-{id}-source-template.xlsx`.
-- En `POST /imports/excel-file`, si `moduleId` existe se reemplazan sus datos; si no existe o viene vacio, se crea modulo nuevo.
+- En `POST /imports/excel-file`, si `moduleId` existe y es accesible para el usuario actual se reemplazan sus datos; si no existe o viene vacio, se crea modulo nuevo.
 
 Exportar plantilla oficial (`source_template.xlsx`) con datos del backend mediante Python:
 
@@ -297,7 +307,7 @@ curl -L "http://localhost:8080/modules/export/template/base" \
 Descargar plantilla rellenada de referencia:
 
 ```bash
-curl -L "http://localhost:8080/modules/export/template/filled" \
+curl -L "http://localhost:8080/modules/export/template/filled?variant=1" \
   -H "Authorization: Bearer $TOKEN" \
   -o "source_template_rellenada_unprotected.xlsx"
 ```

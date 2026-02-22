@@ -32,29 +32,41 @@ Ejemplo `.env`:
 VITE_API_BASE_URL=/api
 ```
 
+Registro opcional (solo si el backend expone ese endpoint):
+
+```bash
+VITE_AUTH_REGISTER_PATH=/auth/register
+```
+
 ## Flujo actual
 
-1. Login/logout con JWT (`/auth/login`).
+1. Login con JWT (`/auth/login`) y logout local (limpieza de token en frontend).
+   - Si no hay sesion, solo se muestra la vista de login.
+   - Si hay sesion, se oculta login y se muestra el resto de la app.
+   - Boton "Crear cuenta" opcional si existe `VITE_AUTH_REGISTER_PATH`.
 2. Gestion de modulos:
-   - crear modulo (`POST /modules`)
-   - seleccionar modulo activo por ID
+   - cargar lista de modulos accesibles (`GET /modules`)
+   - seleccionar modulo activo desde selector
    - eliminar modulo (`DELETE /modules/{id}`)
 3. Importacion:
    - PDF de RAs (`POST /imports/ra`) + consulta de job (`GET /imports/ra/{jobId}`) + guardado de RAs (`POST /modules/{id}/ras/import`)
    - XLSX de plantilla oficial (`POST /imports/excel-file`), con reemplazo de modulo si `moduleId` existe
 4. Vista previa por modulo:
+   - selector de modulo desde lista cargada (`GET /modules`)
    - estructura base (`GET /modules/{id}/preview`)
    - evaluaciones (`GET /modules/{id}/reports/evaluation/{n}`)
    - final (`GET /modules/{id}/reports/final`)
    - edicion de ejercicios por alumno/instrumento + guardado (`POST /grades`)
    - descarga Excel del modulo (`GET /modules/{id}/export/excel`)
+   - selector de plantilla: base vacia, rellenada 1, rellenada 2
    - descarga plantilla base (`GET /modules/export/template/base`)
-   - descarga plantilla rellenada (`GET /modules/export/template/filled`)
+   - descarga plantilla rellenada (`GET /modules/export/template/filled?variant=1|2`)
 
 ## Endpoints consumidos
 
 - `POST /auth/login`
-- `POST /modules`
+- `POST ${VITE_AUTH_REGISTER_PATH}` (opcional, solo si se configura)
+- `GET /modules`
 - `DELETE /modules/{id}`
 - `POST /imports/ra`
 - `GET /imports/ra/{jobId}`
@@ -66,14 +78,14 @@ VITE_API_BASE_URL=/api
 - `POST /grades`
 - `GET /modules/{id}/export/excel`
 - `GET /modules/export/template/base`
-- `GET /modules/export/template/filled`
+- `GET /modules/export/template/filled?variant=1|2`
 
 ## Estructura relevante
 
 - `src/App.jsx`: estado global y flujo principal (navegacion por hash).
 - `src/lib/api.js`: wrapper de `fetch`, token y manejo de errores.
-- `src/views/LoginView.jsx`: login.
-- `src/views/ModulesView.jsx`: alta/borrado de modulo.
+- `src/views/LoginView.jsx`: login y registro opcional por configuracion.
+- `src/views/ModulesView.jsx`: selector y borrado de modulo.
 - `src/views/ImportView.jsx`: importacion PDF/XLSX y persistencia de RAs detectados.
 - `src/views/PreviewView.jsx`: tablas de vista previa y reportes.
 
@@ -82,5 +94,6 @@ VITE_API_BASE_URL=/api
 - En importacion PDF, el `moduleId` es obligatorio.
 - En importacion XLSX, `moduleId` es opcional: si existe se reemplaza ese modulo; si no, se crea uno nuevo.
 - Tras importar XLSX, el frontend selecciona automaticamente el `moduleId` devuelto por backend.
+- El selector de modulos se carga desde `GET /modules` y depende del usuario autenticado.
 - La UI ordena codigos de forma natural (`RA2` antes que `RA10`) en las tablas de preview.
 
