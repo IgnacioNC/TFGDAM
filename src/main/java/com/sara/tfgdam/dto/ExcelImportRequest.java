@@ -93,6 +93,9 @@ public class ExcelImportRequest {
         private List<@NotBlank(message = "raCode cannot be blank") String> raCodes;
 
         @Valid
+        private List<UTRADistributionItem> raDistributions;
+
+        @Valid
         private List<ExerciseWeightItem> exerciseWeights;
     }
 
@@ -139,6 +142,9 @@ public class ExcelImportRequest {
         @DecimalMin(value = "0.00", message = "weightPercent must be >= 0")
         @DecimalMax(value = "100.00", message = "weightPercent must be <= 100")
         private BigDecimal weightPercent;
+
+        // Optional. When present, ties this exercise to a concrete RA code.
+        private String raCode;
     }
 
     @Getter

@@ -43,10 +43,13 @@ public class InstrumentExerciseWeight {
     @JoinColumn(name = "instrument_id", nullable = false)
     private Instrument instrument;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "ra_id")
+    private LearningOutcomeRA learningOutcome;
+
     @Column(name = "exercise_index", nullable = false)
     private Integer exerciseIndex;
 
     @Column(name = "weight_percent", nullable = false, precision = 5, scale = 2)
     private BigDecimal weightPercent;
 }
-

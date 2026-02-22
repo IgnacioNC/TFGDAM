@@ -1,6 +1,7 @@
 package com.sara.tfgdam.service;
 
 import com.sara.tfgdam.domain.entity.Instrument;
+import com.sara.tfgdam.domain.entity.InstrumentRA;
 import com.sara.tfgdam.domain.entity.InstrumentExerciseWeight;
 import com.sara.tfgdam.domain.entity.LearningOutcomeRA;
 import com.sara.tfgdam.domain.entity.Student;
@@ -21,6 +22,7 @@ import com.sara.tfgdam.dto.UpsertUTRALinkRequest;
 import com.sara.tfgdam.exception.BusinessValidationException;
 import com.sara.tfgdam.repository.CourseModuleRepository;
 import com.sara.tfgdam.repository.InstrumentExerciseWeightRepository;
+import com.sara.tfgdam.repository.InstrumentRARepository;
 import com.sara.tfgdam.repository.StudentEvaluationOverrideRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -33,6 +35,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.math.BigDecimal;
 
 @Service
 @RequiredArgsConstructor
@@ -42,6 +45,7 @@ public class ExcelJsonImportService {
     private final GradeService gradeService;
     private final CourseModuleRepository courseModuleRepository;
     private final InstrumentExerciseWeightRepository instrumentExerciseWeightRepository;
+    private final InstrumentRARepository instrumentRARepository;
     private final StudentEvaluationOverrideRepository studentEvaluationOverrideRepository;
 
     @Transactional
@@ -57,6 +61,7 @@ public class ExcelJsonImportService {
 
         Map<String, Long> raIdsByCode = new LinkedHashMap<>();
         Map<String, Long> raIdsByNormalizedCode = new LinkedHashMap<>();
+        Map<String, LearningOutcomeRA> rasByNormalizedCode = new LinkedHashMap<>();
         for (var item : request.getRas()) {
             CreateRARequest createRARequest = new CreateRARequest();
             createRARequest.setCode(item.getCode());
@@ -65,7 +70,9 @@ public class ExcelJsonImportService {
 
             LearningOutcomeRA ra = moduleSetupService.createRA(module.getId(), createRARequest);
             raIdsByCode.put(item.getCode().trim(), ra.getId());
-            raIdsByNormalizedCode.put(normalizeKey(item.getCode()), ra.getId());
+            String normalizedRaCode = normalizeKey(item.getCode());
+            raIdsByNormalizedCode.put(normalizedRaCode, ra.getId());
+            rasByNormalizedCode.put(normalizedRaCode, ra);
         }
 
         Map<String, Long> utIdsByKey = new LinkedHashMap<>();
@@ -127,15 +134,50 @@ public class ExcelJsonImportService {
                 setRequest.setRaIds(raIds);
                 moduleSetupService.setInstrumentRAs(instrument.getId(), setRequest);
 
+                List<ExcelImportRequest.UTRADistributionItem> instrumentRaDistributions =
+                        instrumentItem.getRaDistributions() == null ? List.of() : instrumentItem.getRaDistributions();
+                if (!instrumentRaDistributions.isEmpty()) {
+                    Map<Long, BigDecimal> percentByRaId = new LinkedHashMap<>();
+                    for (ExcelImportRequest.UTRADistributionItem distribution : instrumentRaDistributions) {
+                        Long raId = raIdsByNormalizedCode.get(normalizeKey(distribution.getRaCode()));
+                        if (raId == null) {
+                            throw new BusinessValidationException(
+                                    "RA code not found for instrument RA distribution: " + distribution.getRaCode()
+                            );
+                        }
+                        percentByRaId.merge(raId, distribution.getPercent(), BigDecimal::add);
+                    }
+
+                    List<InstrumentRA> links = instrumentRARepository.findByInstrumentId(instrument.getId());
+                    for (InstrumentRA link : links) {
+                        BigDecimal percent = percentByRaId.get(link.getLearningOutcome().getId());
+                        link.setPercent(percent);
+                    }
+                    instrumentRARepository.saveAll(links);
+                }
+
                 List<ExcelImportRequest.ExerciseWeightItem> exerciseWeights = instrumentItem.getExerciseWeights();
                 if (exerciseWeights != null && !exerciseWeights.isEmpty()) {
                     instrumentExerciseWeightRepository.saveAll(
                             exerciseWeights.stream()
-                                    .map(item -> InstrumentExerciseWeight.builder()
-                                            .instrument(instrument)
-                                            .exerciseIndex(item.getExerciseIndex())
-                                            .weightPercent(item.getWeightPercent())
-                                            .build())
+                                    .map(item -> {
+                                        LearningOutcomeRA linkedRa = null;
+                                        if (item.getRaCode() != null && !item.getRaCode().trim().isEmpty()) {
+                                            linkedRa = rasByNormalizedCode.get(normalizeKey(item.getRaCode()));
+                                            if (linkedRa == null) {
+                                                throw new BusinessValidationException(
+                                                        "exerciseWeight references unknown RA code: " + item.getRaCode()
+                                                );
+                                            }
+                                        }
+
+                                        return InstrumentExerciseWeight.builder()
+                                                .instrument(instrument)
+                                                .learningOutcome(linkedRa)
+                                                .exerciseIndex(item.getExerciseIndex())
+                                                .weightPercent(item.getWeightPercent())
+                                                .build();
+                                    })
                                     .toList()
                     );
                 }
@@ -271,6 +313,32 @@ public class ExcelJsonImportService {
                     if (!normalizedRaCodes.contains(raCode)) {
                         throw new BusinessValidationException(
                                 "Instrument references unknown RA code: " + raCodeRaw.trim()
+                        );
+                    }
+                }
+                Set<String> instrumentRaCodes = instrument.getRaCodes().stream()
+                        .map(this::normalizeKey)
+                        .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+
+                List<ExcelImportRequest.UTRADistributionItem> raDistributions =
+                        instrument.getRaDistributions() == null ? List.of() : instrument.getRaDistributions();
+                Set<String> seenDistributionRaCodes = new LinkedHashSet<>();
+                for (ExcelImportRequest.UTRADistributionItem distribution : raDistributions) {
+                    String raCode = normalizeKey(distribution.getRaCode());
+                    if (!normalizedRaCodes.contains(raCode)) {
+                        throw new BusinessValidationException(
+                                "Instrument RA distribution references unknown RA code: " + distribution.getRaCode().trim()
+                        );
+                    }
+                    if (!instrumentRaCodes.contains(raCode)) {
+                        throw new BusinessValidationException(
+                                "Instrument RA distribution uses RA not linked in raCodes: "
+                                        + instrument.getKey().trim() + " -> " + distribution.getRaCode().trim()
+                        );
+                    }
+                    if (!seenDistributionRaCodes.add(raCode)) {
+                        throw new BusinessValidationException(
+                                "Duplicated RA distribution in instrument: " + instrument.getKey().trim() + " -> " + distribution.getRaCode().trim()
                         );
                     }
                 }
