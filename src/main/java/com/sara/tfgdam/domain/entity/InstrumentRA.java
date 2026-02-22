@@ -1,5 +1,6 @@
 package com.sara.tfgdam.domain.entity;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
@@ -14,6 +15,8 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+
+import java.math.BigDecimal;
 
 @Entity
 @Table(
@@ -40,4 +43,7 @@ public class InstrumentRA {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "ra_id", nullable = false)
     private LearningOutcomeRA learningOutcome;
+
+    @Column(name = "percent", precision = 5, scale = 2)
+    private BigDecimal percent;
 }

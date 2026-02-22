@@ -59,6 +59,7 @@ public class ExcelTemplateMapperService {
     private static final int ACT_BLOCK_WIDTH = 11;    // note + 10 exercises
     private static final int ACT_BLOCK_COUNT = 30;
     private static final int ACT_ROW_STUDENT_START = 5; // row 6
+    private static final int ACT_ROW_RA_CODES = 2;      // row 3
     private static final int ACT_ROW_WEIGHTS = 3;       // row 4
 
     private static final int EVAL_ROW_STUDENT_START = 4; // row 5
@@ -104,9 +105,20 @@ public class ExcelTemplateMapperService {
             Map<Integer, String> raCodeByColumn = parseRAColumnHeaders(datos, 7, evaluator, formatter);
             List<ActivityRow> activityRows = parseActivityRows(datos, raCodeByColumn, evaluator, formatter);
             Map<String, Integer> evalByUtKey = buildEvaluationByUT(activityRows);
-            Map<String, List<ExcelImportRequest.InstrumentItem>> instrumentsByUtKey = buildInstrumentsByUT(activityRows);
+            Map<String, List<ExcelImportRequest.ExerciseWeightItem>> exerciseWeightsByActivityName =
+                    parseExerciseWeightsByActivityName(actividades, ras, evaluator, formatter);
+            Map<String, List<ExcelImportRequest.InstrumentItem>> instrumentsByUtKey =
+                    buildInstrumentsByUT(activityRows, exerciseWeightsByActivityName);
 
-            List<ExcelImportRequest.UTItem> uts = parseUTs(datos, raCodeByColumn, evalByUtKey, instrumentsByUtKey, evaluator, formatter);
+            List<ExcelImportRequest.UTItem> uts = parseUTs(
+                    datos,
+                    raCodeByColumn,
+                    activityRows,
+                    evalByUtKey,
+                    instrumentsByUtKey,
+                    evaluator,
+                    formatter
+            );
             if (uts.isEmpty()) {
                 throw new BusinessValidationException("No UTs found in template");
             }
@@ -208,6 +220,7 @@ public class ExcelTemplateMapperService {
 
             BigDecimal totalWeight = BigDecimal.ZERO;
             List<String> raCodes = new ArrayList<>();
+            Map<String, BigDecimal> raDistributionsByCode = new LinkedHashMap<>();
 
             for (int col = COL_RA_START; col <= COL_RA_END; col++) {
                 BigDecimal value = getDecimal(datos, row, col, evaluator, formatter);
@@ -218,6 +231,7 @@ public class ExcelTemplateMapperService {
                 String raCode = raCodeByColumn.get(col);
                 if (!isBlank(raCode)) {
                     raCodes.add(raCode);
+                    raDistributionsByCode.put(raCode.trim(), scale2(value));
                 }
             }
 
@@ -256,6 +270,14 @@ public class ExcelTemplateMapperService {
             item.evaluationPeriod = evaluation == null ? null : evaluation.intValue();
             item.weightPercent = scale2(totalWeight);
             item.raCodes = raCodes.stream().map(String::trim).distinct().toList();
+            item.raDistributions = raDistributionsByCode.entrySet().stream()
+                    .map(entry -> {
+                        ExcelImportRequest.UTRADistributionItem distribution = new ExcelImportRequest.UTRADistributionItem();
+                        distribution.setRaCode(entry.getKey());
+                        distribution.setPercent(entry.getValue());
+                        return distribution;
+                    })
+                    .toList();
             rows.add(item);
         }
 
@@ -279,7 +301,60 @@ public class ExcelTemplateMapperService {
         return evalByUtKey;
     }
 
-    private Map<String, List<ExcelImportRequest.InstrumentItem>> buildInstrumentsByUT(List<ActivityRow> rows) {
+    private Map<String, List<ExcelImportRequest.ExerciseWeightItem>> parseExerciseWeightsByActivityName(
+            Sheet actividades,
+            List<ImportRAItemDto> ras,
+            FormulaEvaluator evaluator,
+            DataFormatter formatter
+    ) {
+        Map<String, List<ExcelImportRequest.ExerciseWeightItem>> byActivityName = new LinkedHashMap<>();
+        if (actividades == null) {
+            return byActivityName;
+        }
+        Map<String, String> canonicalRaByToken = buildCanonicalRaByToken(ras);
+
+        for (int i = 0; i < ACT_BLOCK_COUNT; i++) {
+            int startCol = ACT_BLOCK_START_COL + (i * ACT_BLOCK_WIDTH);
+            String activityName = trimOrNull(getString(actividades, 0, startCol, evaluator, formatter));
+            if (isBlank(activityName)) {
+                continue;
+            }
+
+            List<ExcelImportRequest.ExerciseWeightItem> weights = new ArrayList<>();
+            for (int offset = 1; offset <= 10; offset++) {
+                int col = startCol + offset;
+                BigDecimal value = getDecimal(actividades, ACT_ROW_WEIGHTS, col, evaluator, formatter);
+                if (value == null || value.compareTo(BigDecimal.ZERO) <= 0) {
+                    continue;
+                }
+
+                String rawRaToken = trimOrNull(getString(actividades, ACT_ROW_RA_CODES, col, evaluator, formatter));
+                String resolvedRaCode = resolveExerciseRaCode(rawRaToken, canonicalRaByToken);
+                if (!isBlank(rawRaToken) && isBlank(resolvedRaCode)) {
+                    throw new BusinessValidationException(
+                            "Cannot map exercise RA token '" + rawRaToken + "' for activity '" + activityName + "'"
+                    );
+                }
+
+                ExcelImportRequest.ExerciseWeightItem item = new ExcelImportRequest.ExerciseWeightItem();
+                item.setExerciseIndex(offset);
+                item.setWeightPercent(scale2(value));
+                item.setRaCode(resolvedRaCode);
+                weights.add(item);
+            }
+
+            if (!weights.isEmpty()) {
+                byActivityName.put(normalize(activityName), weights);
+            }
+        }
+
+        return byActivityName;
+    }
+
+    private Map<String, List<ExcelImportRequest.InstrumentItem>> buildInstrumentsByUT(
+            List<ActivityRow> rows,
+            Map<String, List<ExcelImportRequest.ExerciseWeightItem>> exerciseWeightsByActivityName
+    ) {
         Map<String, List<ActivityRow>> rowsByUt = new LinkedHashMap<>();
         for (ActivityRow row : rows) {
             rowsByUt.computeIfAbsent(normalize(row.utKey), ignored -> new ArrayList<>()).add(row);
@@ -319,6 +394,10 @@ public class ExcelTemplateMapperService {
                 instrumentItem.setName(row.activityName);
                 instrumentItem.setWeightPercent(scale2(normalizedWeight));
                 instrumentItem.setRaCodes(row.raCodes);
+                instrumentItem.setRaDistributions(row.raDistributions);
+                List<ExcelImportRequest.ExerciseWeightItem> exerciseWeights =
+                        exerciseWeightsByActivityName.getOrDefault(normalize(row.activityName), List.of());
+                instrumentItem.setExerciseWeights(exerciseWeights);
                 instruments.add(instrumentItem);
 
                 assigned = assigned.add(instrumentItem.getWeightPercent());
@@ -332,31 +411,23 @@ public class ExcelTemplateMapperService {
 
     private List<ExcelImportRequest.UTItem> parseUTs(Sheet datos,
                                                      Map<Integer, String> raCodeByColumn,
+                                                     List<ActivityRow> activityRows,
                                                      Map<String, Integer> evalByUtKey,
                                                      Map<String, List<ExcelImportRequest.InstrumentItem>> instrumentsByUtKey,
                                                      FormulaEvaluator evaluator,
                                                      DataFormatter formatter) {
         List<ExcelImportRequest.UTItem> uts = new ArrayList<>();
+        Map<String, List<ExcelImportRequest.UTRADistributionItem>> distributionsByUtKey =
+                buildUTDistributionsFromActivities(activityRows);
 
         for (int row = UT_ROW_START; row <= UT_ROW_END; row++) {
             String utKey = trimOrNull(getString(datos, row, COL_UT_KEY, evaluator, formatter));
 
-            List<ExcelImportRequest.UTRADistributionItem> distributions = new ArrayList<>();
-            for (int col = COL_RA_START; col <= COL_RA_END; col++) {
-                BigDecimal percent = getDecimal(datos, row, col, evaluator, formatter);
-                if (percent == null || percent.compareTo(BigDecimal.ZERO) <= 0) {
-                    continue;
-                }
-
-                String raCode = trimOrNull(raCodeByColumn.get(col));
-                if (isBlank(raCode)) {
-                    continue;
-                }
-
-                ExcelImportRequest.UTRADistributionItem item = new ExcelImportRequest.UTRADistributionItem();
-                item.setRaCode(raCode);
-                item.setPercent(scale2(percent));
-                distributions.add(item);
+            List<ExcelImportRequest.UTRADistributionItem> distributions = isBlank(utKey)
+                    ? List.of()
+                    : distributionsByUtKey.getOrDefault(normalize(utKey), List.of());
+            if (distributions.isEmpty()) {
+                distributions = parseUTDistributionsFromTable2(datos, row, raCodeByColumn, evaluator, formatter);
             }
 
             if (isBlank(utKey) && distributions.isEmpty()) {
@@ -390,6 +461,70 @@ public class ExcelTemplateMapperService {
         }
 
         return uts;
+    }
+
+    private Map<String, List<ExcelImportRequest.UTRADistributionItem>> buildUTDistributionsFromActivities(
+            List<ActivityRow> activityRows
+    ) {
+        Map<String, Map<String, BigDecimal>> aggregate = new LinkedHashMap<>();
+        for (ActivityRow row : activityRows) {
+            if (isBlank(row.utKey) || row.raDistributions == null) {
+                continue;
+            }
+            Map<String, BigDecimal> byRaCode = aggregate.computeIfAbsent(normalize(row.utKey), ignored -> new LinkedHashMap<>());
+            for (ExcelImportRequest.UTRADistributionItem distribution : row.raDistributions) {
+                if (distribution == null || isBlank(distribution.getRaCode()) || distribution.getPercent() == null) {
+                    continue;
+                }
+                byRaCode.merge(
+                        distribution.getRaCode().trim(),
+                        scale2(distribution.getPercent()),
+                        BigDecimal::add
+                );
+            }
+        }
+
+        Map<String, List<ExcelImportRequest.UTRADistributionItem>> result = new LinkedHashMap<>();
+        for (var entry : aggregate.entrySet()) {
+            List<ExcelImportRequest.UTRADistributionItem> items = entry.getValue().entrySet().stream()
+                    .filter(item -> item.getValue().compareTo(BigDecimal.ZERO) > 0)
+                    .map(item -> {
+                        ExcelImportRequest.UTRADistributionItem dto = new ExcelImportRequest.UTRADistributionItem();
+                        dto.setRaCode(item.getKey());
+                        dto.setPercent(scale2(item.getValue()));
+                        return dto;
+                    })
+                    .toList();
+            result.put(entry.getKey(), items);
+        }
+        return result;
+    }
+
+    private List<ExcelImportRequest.UTRADistributionItem> parseUTDistributionsFromTable2(
+            Sheet datos,
+            int row,
+            Map<Integer, String> raCodeByColumn,
+            FormulaEvaluator evaluator,
+            DataFormatter formatter
+    ) {
+        List<ExcelImportRequest.UTRADistributionItem> distributions = new ArrayList<>();
+        for (int col = COL_RA_START; col <= COL_RA_END; col++) {
+            BigDecimal percent = getDecimal(datos, row, col, evaluator, formatter);
+            if (percent == null || percent.compareTo(BigDecimal.ZERO) <= 0) {
+                continue;
+            }
+
+            String raCode = trimOrNull(raCodeByColumn.get(col));
+            if (isBlank(raCode)) {
+                continue;
+            }
+
+            ExcelImportRequest.UTRADistributionItem item = new ExcelImportRequest.UTRADistributionItem();
+            item.setRaCode(raCode);
+            item.setPercent(scale2(percent));
+            distributions.add(item);
+        }
+        return distributions;
     }
 
     private List<ExcelImportRequest.StudentItem> parseStudents(Sheet datos,
@@ -472,6 +607,8 @@ public class ExcelTemplateMapperService {
 
                 boolean hasMainGradeInput = hasUserEnteredValue(actividades, row, startCol, formatter);
                 boolean hasExercisesInput = hasUserEnteredValueInRange(actividades, row, startCol + 1, startCol + 10, formatter);
+                List<ExcelImportRequest.ExerciseGradeItem> exerciseGradeItems =
+                        parseExerciseGradeInputs(actividades, row, startCol + 1, evaluator, formatter);
 
                 BigDecimal grade = hasMainGradeInput
                         ? getDecimal(actividades, row, startCol, evaluator, formatter)
@@ -486,6 +623,9 @@ public class ExcelTemplateMapperService {
                 ExcelImportRequest.GradeItem item = new ExcelImportRequest.GradeItem();
                 item.setInstrumentKey(instrumentKey);
                 item.setGradeValue(scale2(grade));
+                if (!exerciseGradeItems.isEmpty()) {
+                    item.setExerciseGrades(exerciseGradeItems);
+                }
                 student.getGrades().add(item);
             }
         }
@@ -560,6 +700,9 @@ public class ExcelTemplateMapperService {
                 }
 
                 boolean allRAsPassed = failedRaw == null || failedRaw.compareTo(BigDecimal.ZERO) <= 0;
+                int failedRasCount = failedRaw == null
+                        ? 0
+                        : Math.max(0, failedRaw.setScale(0, RoundingMode.HALF_UP).intValue());
                 int suggestedBulletinGrade = suggestedRaw != null
                         ? suggestedRaw.setScale(0, RoundingMode.HALF_UP).intValue()
                         : calculateSuggestedBulletinGradeFromNumeric(numericGrade, allRAsPassed);
@@ -570,6 +713,7 @@ public class ExcelTemplateMapperService {
                 item.setNumericGrade(scale4(numericGrade));
                 item.setSuggestedBulletinGrade(suggestedBulletinGrade);
                 item.setAllRAsPassed(allRAsPassed);
+                item.setFailedRasCount(failedRasCount);
 
                 String key = normalize(studentCode) + "#" + evaluationPeriod;
                 unique.put(key, item);
@@ -622,6 +766,33 @@ public class ExcelTemplateMapperService {
             }
         }
         return false;
+    }
+
+    private List<ExcelImportRequest.ExerciseGradeItem> parseExerciseGradeInputs(Sheet actividades,
+                                                                                 int studentRow,
+                                                                                 int exerciseStartCol,
+                                                                                 FormulaEvaluator evaluator,
+                                                                                 DataFormatter formatter) {
+        List<ExcelImportRequest.ExerciseGradeItem> result = new ArrayList<>();
+
+        for (int offset = 0; offset < 10; offset++) {
+            int col = exerciseStartCol + offset;
+            if (!hasUserEnteredValue(actividades, studentRow, col, formatter)) {
+                continue;
+            }
+
+            BigDecimal grade = getDecimal(actividades, studentRow, col, evaluator, formatter);
+            if (grade == null) {
+                continue;
+            }
+
+            ExcelImportRequest.ExerciseGradeItem item = new ExcelImportRequest.ExerciseGradeItem();
+            item.setExerciseIndex(offset + 1);
+            item.setGradeValue(scale2(grade));
+            result.add(item);
+        }
+
+        return result;
     }
 
     private BigDecimal computeGradeFromExercises(Sheet actividades,
@@ -729,6 +900,76 @@ public class ExcelTemplateMapperService {
         }
     }
 
+    private Map<String, String> buildCanonicalRaByToken(List<ImportRAItemDto> ras) {
+        Map<String, String> result = new LinkedHashMap<>();
+        if (ras == null || ras.isEmpty()) {
+            return result;
+        }
+
+        int sequence = 1;
+        for (ImportRAItemDto ra : ras) {
+            String code = trimOrNull(ra == null ? null : ra.getCode());
+            if (isBlank(code)) {
+                sequence++;
+                continue;
+            }
+
+            String canonical = code.trim();
+            result.putIfAbsent(normalize(canonical), canonical);
+
+            String digits = extractDigits(canonical);
+            if (!digits.isEmpty()) {
+                result.putIfAbsent(digits, canonical);
+            }
+
+            result.putIfAbsent(String.valueOf(sequence), canonical);
+            sequence++;
+        }
+        return result;
+    }
+
+    private String resolveExerciseRaCode(String rawToken, Map<String, String> canonicalRaByToken) {
+        if (isBlank(rawToken) || canonicalRaByToken == null || canonicalRaByToken.isEmpty()) {
+            return null;
+        }
+
+        String normalized = normalize(rawToken);
+        String direct = canonicalRaByToken.get(normalized);
+        if (!isBlank(direct)) {
+            return direct;
+        }
+
+        String compact = normalized.replace(" ", "");
+        direct = canonicalRaByToken.get(compact);
+        if (!isBlank(direct)) {
+            return direct;
+        }
+
+        String digits = extractDigits(compact);
+        if (!digits.isEmpty()) {
+            direct = canonicalRaByToken.get(digits);
+            if (!isBlank(direct)) {
+                return direct;
+            }
+        }
+
+        return null;
+    }
+
+    private String extractDigits(String value) {
+        if (value == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (Character.isDigit(ch)) {
+                sb.append(ch);
+            }
+        }
+        return sb.toString();
+    }
+
     private BigDecimal scale2(BigDecimal value) {
         return value.setScale(2, RoundingMode.HALF_UP);
     }
@@ -772,5 +1013,6 @@ public class ExcelTemplateMapperService {
         private Integer evaluationPeriod;
         private BigDecimal weightPercent;
         private List<String> raCodes;
+        private List<ExcelImportRequest.UTRADistributionItem> raDistributions;
     }
 }

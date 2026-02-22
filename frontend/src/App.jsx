@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import './App.css'
-import { apiRequest, getApiBaseUrl, normalizeError } from './lib/api'
+import { apiDownload, apiRequest, getApiBaseUrl, normalizeError } from './lib/api'
 import ImportView from './views/ImportView'
 import LoginView from './views/LoginView'
 import ModulesView from './views/ModulesView'
@@ -25,11 +25,7 @@ function App() {
   const [email, setEmail] = useState('admin@admin.com')
   const [password, setPassword] = useState('adminmiralmonte')
   const [selectedModuleId, setSelectedModuleId] = useState('')
-  const [newModule, setNewModule] = useState({
-    name: '',
-    academicYear: '2025-2026',
-    teacherName: '',
-  })
+  const [modules, setModules] = useState([])
   const [importForm, setImportForm] = useState({ moduleId: '', file: null })
   const [importJobId, setImportJobId] = useState('')
   const [importJobData, setImportJobData] = useState(null)
@@ -41,6 +37,8 @@ function App() {
   const [log, setLog] = useState('')
 
   const isAuthenticated = useMemo(() => Boolean(token), [token])
+  const registerPath = useMemo(() => String(import.meta.env.VITE_AUTH_REGISTER_PATH || '').trim(), [])
+  const canRegister = useMemo(() => Boolean(registerPath), [registerPath])
 
   const navigate = useCallback((nextRoute) => {
     window.location.hash = nextRoute
@@ -57,7 +55,35 @@ function App() {
     if (!isAuthenticated && route !== ROUTES.login) navigate(ROUTES.login)
   }, [isAuthenticated, route, navigate])
 
+  useEffect(() => {
+    if (isAuthenticated && route === ROUTES.login) navigate(ROUTES.modules)
+  }, [isAuthenticated, route, navigate])
+
   const pushLog = (message) => setLog(message)
+
+  const reloadModules = useCallback(
+    async (authToken = token) => {
+      if (!authToken) {
+        setModules([])
+        return []
+      }
+
+      try {
+        const loaded = await apiRequest('/modules', { token: authToken })
+        const normalized = Array.isArray(loaded) ? loaded : []
+        setModules(normalized)
+        return normalized
+      } catch {
+        setModules([])
+        return []
+      }
+    },
+    [token],
+  )
+
+  useEffect(() => {
+    void reloadModules(token)
+  }, [reloadModules, token])
 
   const login = async (event) => {
     event.preventDefault()
@@ -79,9 +105,33 @@ function App() {
     }
   }
 
+  const register = async () => {
+    if (!canRegister) {
+      pushLog('El registro no esta disponible en este backend.')
+      return
+    }
+
+    setBusy(true)
+    try {
+      await apiRequest(registerPath, {
+        method: 'POST',
+        body: {
+          email,
+          password,
+        },
+      })
+      pushLog('Cuenta creada. Ya puedes iniciar sesion.')
+    } catch (error) {
+      pushLog(normalizeError(error, 'No se pudo crear la cuenta.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const logout = () => {
     localStorage.removeItem('sara_token')
     setToken('')
+    setModules([])
     setSelectedModuleId('')
     setImportForm({ moduleId: '', file: null })
     setImportJobId('')
@@ -92,31 +142,6 @@ function App() {
     setPreviewFinalReport(null)
     pushLog('Sesion cerrada.')
     navigate(ROUTES.login)
-  }
-
-  const createModule = async (event) => {
-    event.preventDefault()
-    if (!token) return
-    if (!newModule.teacherName.trim()) {
-      pushLog('El campo Docente es obligatorio para crear modulo.')
-      return
-    }
-    setBusy(true)
-    try {
-      const payload = {
-        name: newModule.name.trim(),
-        academicYear: newModule.academicYear.trim(),
-      }
-      if (newModule.teacherName.trim()) payload.teacherName = newModule.teacherName.trim()
-      const created = await apiRequest('/modules', { method: 'POST', token, body: payload })
-      setSelectedModuleId(String(created.id))
-      setImportForm((prev) => ({ ...prev, moduleId: String(created.id) }))
-      pushLog(`Modulo creado: #${created.id} ${created.name}`)
-    } catch (error) {
-      pushLog(normalizeError(error, 'No se pudo crear el modulo.'))
-    } finally {
-      setBusy(false)
-    }
   }
 
   const deleteModule = async () => {
@@ -153,6 +178,7 @@ function App() {
       setImportJobId('')
       setImportJobData(null)
       setDetectedRas([])
+      await reloadModules()
       pushLog(`Modulo #${moduleId} eliminado.`)
     } catch (error) {
       pushLog(normalizeError(error, 'No se pudo eliminar el modulo.'))
@@ -197,8 +223,9 @@ function App() {
     }
 
     const extension = getFileExtension(importForm.file.name)
+    const normalizedModuleId = String(importForm.moduleId || '').trim()
 
-    if (extension === '.pdf' && !importForm.moduleId) {
+    if (extension === '.pdf' && !normalizedModuleId) {
       pushLog('Para PDF debes indicar el modulo (ID).')
       return
     }
@@ -208,11 +235,16 @@ function App() {
       return
     }
 
+    if (normalizedModuleId && !/^\d+$/.test(normalizedModuleId)) {
+      pushLog('El modulo (ID) debe ser numerico.')
+      return
+    }
+
     setBusy(true)
     try {
       if (extension === '.pdf') {
         const formData = new FormData()
-        formData.append('moduleId', importForm.moduleId)
+        formData.append('moduleId', normalizedModuleId)
         formData.append('file', importForm.file)
 
         const createdJob = await apiRequest('/imports/ra', {
@@ -228,6 +260,9 @@ function App() {
       }
 
       const excelFormData = new FormData()
+      if (normalizedModuleId) {
+        excelFormData.append('moduleId', normalizedModuleId)
+      }
       excelFormData.append('file', importForm.file)
 
       const imported = await apiRequest('/imports/excel-file', {
@@ -243,6 +278,7 @@ function App() {
         setSelectedModuleId(String(imported.moduleId))
         setImportForm((prev) => ({ ...prev, moduleId: String(imported.moduleId) }))
       }
+      await reloadModules()
       pushLog(
         `Excel importado: modulo #${imported.moduleId}, RAs ${imported.raCount}, UTs ${imported.utCount}, instrumentos ${imported.instrumentCount}, alumnos ${imported.studentCount}, notas ${imported.gradeCount}.`,
       )
@@ -259,7 +295,7 @@ function App() {
 
     const moduleId = String(selectedModuleId || '').trim()
     if (!moduleId) {
-      pushLog('Selecciona un modulo (ID) para cargar la vista previa.')
+      pushLog('Selecciona un modulo para cargar la vista previa.')
       return
     }
 
@@ -295,6 +331,171 @@ function App() {
       setPreviewEvaluationReports([])
       setPreviewFinalReport(null)
       pushLog(normalizeError(error, 'No se pudo cargar la vista previa del modulo.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const onDownloadExcel = async () => {
+    if (!token) return
+
+    const moduleId = String(selectedModuleId || '').trim()
+    if (!moduleId) {
+      pushLog('Selecciona un modulo antes de descargar el Excel.')
+      return
+    }
+
+    setBusy(true)
+    try {
+      const { blob, filename } = await apiDownload(`/modules/${moduleId}/export/excel`, { token })
+      const downloadName = filename || `module-${moduleId}-export.xlsx`
+
+      const url = window.URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = downloadName
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      window.URL.revokeObjectURL(url)
+
+      pushLog(`Excel descargado: ${downloadName}`)
+    } catch (error) {
+      pushLog(normalizeError(error, 'No se pudo descargar el Excel del modulo.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const onDownloadBaseTemplate = async () => {
+    if (!token) return
+
+    setBusy(true)
+    try {
+      const { blob, filename } = await apiDownload('/modules/export/template/base', { token })
+      const downloadName = filename || 'source_template_unprotected.xlsx'
+
+      const url = window.URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = downloadName
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      window.URL.revokeObjectURL(url)
+
+      pushLog(`Plantilla base descargada: ${downloadName}`)
+    } catch (error) {
+      pushLog(normalizeError(error, 'No se pudo descargar la plantilla base.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const onDownloadFilledTemplate = async (variant = '1') => {
+    if (!token) return
+
+    setBusy(true)
+    try {
+      const selectedVariant = String(variant) === '2' ? '2' : '1'
+      const { blob, filename } = await apiDownload(`/modules/export/template/filled?variant=${selectedVariant}`, { token })
+      const downloadName = filename
+        || (selectedVariant === '2'
+          ? 'source_template_rellenada2_unprotected.xlsx'
+          : 'source_template_rellenada_unprotected.xlsx')
+
+      const url = window.URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = downloadName
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      window.URL.revokeObjectURL(url)
+
+      pushLog(`Plantilla rellenada (${selectedVariant}) descargada: ${downloadName}`)
+    } catch (error) {
+      pushLog(normalizeError(error, 'No se pudo descargar la plantilla rellenada.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const onDownloadTemplate = async (templateOption = 'base') => {
+    const option = String(templateOption || 'base')
+    if (option === 'base') {
+      await onDownloadBaseTemplate()
+      return
+    }
+    if (option === 'filled2') {
+      await onDownloadFilledTemplate('2')
+      return
+    }
+    await onDownloadFilledTemplate('1')
+  }
+
+  const onSaveGrades = async (changes) => {
+    if (!token) return false
+
+    const moduleId = String(selectedModuleId || '').trim()
+    if (!moduleId) {
+      pushLog('Selecciona un modulo antes de guardar notas.')
+      return false
+    }
+    if (!Array.isArray(changes) || changes.length === 0) {
+      pushLog('No hay notas modificadas para guardar.')
+      return false
+    }
+
+    setBusy(true)
+    try {
+      await apiRequest('/grades', {
+        method: 'POST',
+        token,
+        body: {
+          grades: changes.map((item) => {
+            const payloadItem = {
+              studentId: item.studentId,
+              instrumentId: item.instrumentId,
+            }
+            if (item.gradeValue !== undefined && item.gradeValue !== null) {
+              payloadItem.gradeValue = item.gradeValue
+            }
+            if (Array.isArray(item.exerciseGrades)) {
+              payloadItem.exerciseGrades = item.exerciseGrades.map((exercise) => ({
+                exerciseIndex: exercise.exerciseIndex,
+                gradeValue: exercise.gradeValue,
+              }))
+            }
+            return payloadItem
+          }),
+        },
+      })
+
+      const preview = await apiRequest(`/modules/${moduleId}/preview`, { token })
+      setPreviewData(preview)
+
+      const evaluationPeriods = [
+        ...new Set((preview.uts || []).map((ut) => Number(ut.evaluationPeriod)).filter(Number.isFinite)),
+      ].sort((a, b) => a - b)
+
+      try {
+        const evaluationReports = await Promise.all(
+          evaluationPeriods.map((period) => apiRequest(`/modules/${moduleId}/reports/evaluation/${period}`, { token })),
+        )
+        const finalReport = await apiRequest(`/modules/${moduleId}/reports/final`, { token })
+        setPreviewEvaluationReports(evaluationReports)
+        setPreviewFinalReport(finalReport)
+      } catch {
+        setPreviewEvaluationReports([])
+        setPreviewFinalReport(null)
+      }
+
+      pushLog(`Notas guardadas en BD: ${changes.length}.`)
+      return true
+    } catch (error) {
+      pushLog(normalizeError(error, 'No se pudieron guardar las notas.'))
+      return false
     } finally {
       setBusy(false)
     }
@@ -366,83 +567,89 @@ function App() {
         <p>Flujo: subir PDF/XLSX, extraer con Python, guardar en Spring y mostrar en web.</p>
       </header>
 
-      <nav className="panel nav">
-        <button type="button" onClick={() => navigate(ROUTES.login)}>
-          Login
-        </button>
-        <button type="button" onClick={() => navigate(ROUTES.modules)} disabled={!isAuthenticated}>
-          Modulos
-        </button>
-        <button type="button" onClick={() => navigate(ROUTES.imports)} disabled={!isAuthenticated}>
-          Importar
-        </button>
-        <button type="button" onClick={() => navigate(ROUTES.preview)} disabled={!isAuthenticated}>
-          Preview
-        </button>
-      </nav>
-
-      {route === ROUTES.login && (
+      {!isAuthenticated && (
         <LoginView
           busy={busy}
-          isAuthenticated={isAuthenticated}
           email={email}
           password={password}
           setEmail={setEmail}
           setPassword={setPassword}
           onLogin={login}
-          onLogout={logout}
+          canRegister={canRegister}
+          onRegister={register}
         />
       )}
 
-      {route === ROUTES.modules && (
-        <ModulesView
-          busy={busy}
-          isAuthenticated={isAuthenticated}
-          newModule={newModule}
-          setNewModule={setNewModule}
-          onCreateModule={createModule}
-          onDeleteModule={deleteModule}
-          selectedModuleId={selectedModuleId}
-          setSelectedModuleId={setSelectedModuleId}
-        />
-      )}
+      {isAuthenticated && (
+        <>
+          <nav className="panel nav">
+            <button type="button" onClick={() => navigate(ROUTES.modules)}>
+              Modulos
+            </button>
+            <button type="button" onClick={() => navigate(ROUTES.imports)}>
+              Importar
+            </button>
+            <button type="button" onClick={() => navigate(ROUTES.preview)}>
+              Preview
+            </button>
+            <button type="button" onClick={logout} disabled={busy}>
+              Salir
+            </button>
+          </nav>
 
-      {route === ROUTES.imports && (
-        <ImportView
-          busy={busy}
-          isAuthenticated={isAuthenticated}
-          importForm={importForm}
-          setImportForm={setImportForm}
-          importJobId={importJobId}
-          setImportJobId={setImportJobId}
-          importJobData={importJobData}
-          detectedRas={detectedRas}
-          onCreateImportJob={onCreateImportJob}
-          onLoadImportJob={onLoadImportJob}
-          onUpdateDetectedRa={onUpdateDetectedRa}
-          onPersistDetectedRas={onPersistDetectedRas}
-        />
-      )}
+          {route === ROUTES.modules && (
+            <ModulesView
+              busy={busy}
+              isAuthenticated={isAuthenticated}
+              modules={modules}
+              onDeleteModule={deleteModule}
+              selectedModuleId={selectedModuleId}
+              setSelectedModuleId={setSelectedModuleId}
+            />
+          )}
 
-      {route === ROUTES.preview && (
-        <PreviewView
-          busy={busy}
-          isAuthenticated={isAuthenticated}
-          moduleId={selectedModuleId}
-          setModuleId={setSelectedModuleId}
-          previewData={previewData}
-          evaluationReports={previewEvaluationReports}
-          finalReport={previewFinalReport}
-          onLoadPreview={onLoadPreview}
-        />
-      )}
+          {route === ROUTES.imports && (
+            <ImportView
+              busy={busy}
+              isAuthenticated={isAuthenticated}
+              importForm={importForm}
+              setImportForm={setImportForm}
+              importJobId={importJobId}
+              setImportJobId={setImportJobId}
+              importJobData={importJobData}
+              detectedRas={detectedRas}
+              onCreateImportJob={onCreateImportJob}
+              onLoadImportJob={onLoadImportJob}
+              onUpdateDetectedRa={onUpdateDetectedRa}
+              onPersistDetectedRas={onPersistDetectedRas}
+            />
+          )}
 
-      <section className="panel">
-        <h2>Estado</h2>
-        <p>{busy ? 'Procesando...' : 'Listo'}</p>
-        <p>{log || 'Sin eventos.'}</p>
-        <p>API: {getApiBaseUrl()}</p>
-      </section>
+          {route === ROUTES.preview && (
+            <PreviewView
+              busy={busy}
+              isAuthenticated={isAuthenticated}
+              modules={modules}
+              moduleId={selectedModuleId}
+              setModuleId={setSelectedModuleId}
+              previewData={previewData}
+              evaluationReports={previewEvaluationReports}
+              finalReport={previewFinalReport}
+              onLoadPreview={onLoadPreview}
+              onDownloadExcel={onDownloadExcel}
+              onDownloadTemplate={onDownloadTemplate}
+              onSaveGrades={onSaveGrades}
+            />
+          )}
+
+          <section className="panel">
+            <h2>Estado</h2>
+            <p>{busy ? 'Procesando...' : 'Listo'}</p>
+            <p>{log || 'Sin eventos.'}</p>
+            <p>API: {getApiBaseUrl()}</p>
+          </section>
+        </>
+      )}
     </div>
   )
 }

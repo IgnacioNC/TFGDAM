@@ -35,6 +35,8 @@ import com.sara.tfgdam.repository.ActivityRepository;
 import com.sara.tfgdam.repository.CourseModuleRepository;
 import com.sara.tfgdam.repository.GradeRepository;
 import com.sara.tfgdam.repository.ImportJobRepository;
+import com.sara.tfgdam.repository.InstrumentExerciseGradeRepository;
+import com.sara.tfgdam.repository.InstrumentExerciseWeightRepository;
 import com.sara.tfgdam.repository.InstrumentRARepository;
 import com.sara.tfgdam.repository.InstrumentRepository;
 import com.sara.tfgdam.repository.LearningOutcomeRARepository;
@@ -70,8 +72,11 @@ public class ModuleSetupService {
     private final StudentRepository studentRepository;
     private final StudentEvaluationOverrideRepository studentEvaluationOverrideRepository;
     private final GradeRepository gradeRepository;
+    private final InstrumentExerciseGradeRepository instrumentExerciseGradeRepository;
+    private final InstrumentExerciseWeightRepository instrumentExerciseWeightRepository;
     private final ImportJobRepository importJobRepository;
     private final ConfigurationValidator configurationValidator;
+    private final ModuleAccessService moduleAccessService;
 
     @Transactional
     public Teacher createTeacher(CreateTeacherRequest request) {
@@ -83,19 +88,47 @@ public class ModuleSetupService {
 
     @Transactional
     public CourseModule createModule(CreateModuleRequest request) {
+        var currentUser = moduleAccessService.getCurrentUser();
         Teacher teacher = resolveTeacher(request.getTeacherId(), request.getTeacherName());
 
         CourseModule module = CourseModule.builder()
                 .name(request.getName().trim())
                 .academicYear(request.getAcademicYear())
+                .owner(currentUser)
                 .teacher(teacher)
                 .build();
         return courseModuleRepository.save(module);
     }
 
     @Transactional
+    public CourseModule replaceModuleData(Long moduleId, CreateModuleRequest request) {
+        CourseModule module = getModule(moduleId);
+        clearModuleData(moduleId);
+
+        module.setName(request.getName().trim());
+        module.setAcademicYear(request.getAcademicYear());
+
+        if (request.getTeacherId() != null || (request.getTeacherName() != null && !request.getTeacherName().trim().isEmpty())) {
+            module.setTeacher(resolveTeacher(request.getTeacherId(), request.getTeacherName()));
+        }
+
+        return courseModuleRepository.save(module);
+    }
+
+    @Transactional
     public void deleteModule(Long moduleId) {
         CourseModule module = getModule(moduleId);
+        clearModuleData(moduleId);
+        courseModuleRepository.delete(module);
+    }
+
+    @Transactional(readOnly = true)
+    public List<CourseModule> getModules() {
+        return moduleAccessService.getAccessibleModules();
+    }
+
+    private void clearModuleData(Long moduleId) {
+        getModule(moduleId);
 
         List<Student> students = studentRepository.findByModuleId(moduleId);
         List<Long> studentIds = students.stream().map(Student::getId).toList();
@@ -116,6 +149,8 @@ public class ModuleSetupService {
                 .toList();
 
         if (!instrumentIds.isEmpty()) {
+            instrumentExerciseGradeRepository.deleteByInstrument_IdIn(instrumentIds);
+            instrumentExerciseWeightRepository.deleteByInstrumentIdIn(instrumentIds);
             gradeRepository.deleteByInstrumentIdIn(instrumentIds);
             instrumentRARepository.deleteByInstrumentIdIn(instrumentIds);
             instrumentRepository.deleteAllById(instrumentIds);
@@ -123,6 +158,7 @@ public class ModuleSetupService {
 
         if (!studentIds.isEmpty()) {
             studentEvaluationOverrideRepository.deleteByStudent_Module_Id(moduleId);
+            instrumentExerciseGradeRepository.deleteByStudent_IdIn(studentIds);
             gradeRepository.deleteByStudentIdIn(studentIds);
             studentRepository.deleteAllById(studentIds);
         }
@@ -149,7 +185,6 @@ public class ModuleSetupService {
         }
 
         importJobRepository.deleteByModuleId(moduleId);
-        courseModuleRepository.delete(module);
     }
 
     @Transactional
@@ -300,6 +335,8 @@ public class ModuleSetupService {
             List<Instrument> instruments = instrumentRepository.findByActivityId(activity.getId());
             if (!instruments.isEmpty()) {
                 List<Long> instrumentIds = instruments.stream().map(Instrument::getId).toList();
+                instrumentExerciseGradeRepository.deleteByInstrument_IdIn(instrumentIds);
+                instrumentExerciseWeightRepository.deleteByInstrumentIdIn(instrumentIds);
                 gradeRepository.deleteByInstrumentIdIn(instrumentIds);
                 instrumentRARepository.deleteByInstrumentIdIn(instrumentIds);
                 instrumentRepository.deleteAllById(instrumentIds);
@@ -412,6 +449,8 @@ public class ModuleSetupService {
     @Transactional
     public void deleteInstrument(Long instrumentId) {
         Instrument instrument = getInstrument(instrumentId);
+        instrumentExerciseGradeRepository.deleteByInstrument_Id(instrumentId);
+        instrumentExerciseWeightRepository.deleteByInstrumentId(instrumentId);
         gradeRepository.deleteByInstrumentId(instrumentId);
         instrumentRARepository.deleteByInstrumentId(instrumentId);
         instrumentRepository.delete(instrument);
@@ -608,28 +647,35 @@ public class ModuleSetupService {
     }
 
     private CourseModule getModule(Long moduleId) {
-        return courseModuleRepository.findById(moduleId)
-                .orElseThrow(() -> new ResourceNotFoundException("Module not found: " + moduleId));
+        return moduleAccessService.getAccessibleModule(moduleId);
     }
 
     private LearningOutcomeRA getRA(Long raId) {
-        return learningOutcomeRARepository.findById(raId)
+        LearningOutcomeRA ra = learningOutcomeRARepository.findById(raId)
                 .orElseThrow(() -> new ResourceNotFoundException("RA not found: " + raId));
+        moduleAccessService.assertCanAccessModule(ra.getModule().getId());
+        return ra;
     }
 
     private TeachingUnitUT getUT(Long utId) {
-        return teachingUnitUTRepository.findById(utId)
+        TeachingUnitUT ut = teachingUnitUTRepository.findById(utId)
                 .orElseThrow(() -> new ResourceNotFoundException("UT not found: " + utId));
+        moduleAccessService.assertCanAccessModule(ut.getModule().getId());
+        return ut;
     }
 
     private Activity getActivityByUT(Long utId) {
-        return activityRepository.findByTeachingUnitId(utId)
+        Activity activity = activityRepository.findByTeachingUnitId(utId)
                 .orElseThrow(() -> new ResourceNotFoundException("Activity for UT not found: " + utId));
+        moduleAccessService.assertCanAccessModule(activity.getModule().getId());
+        return activity;
     }
 
     private Instrument getInstrument(Long instrumentId) {
-        return instrumentRepository.findDetailedById(instrumentId)
+        Instrument instrument = instrumentRepository.findDetailedById(instrumentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Instrument not found: " + instrumentId));
+        moduleAccessService.assertCanAccessModule(instrument.getActivity().getModule().getId());
+        return instrument;
     }
 
     private UTRALink getUTRALinkInModule(Long moduleId, Long linkId) {

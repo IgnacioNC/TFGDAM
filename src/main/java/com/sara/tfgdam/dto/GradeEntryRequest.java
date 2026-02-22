@@ -7,6 +7,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 @Getter
 @Setter
@@ -18,8 +19,10 @@ public class GradeEntryRequest {
     @NotNull(message = "instrumentId is required")
     private Long instrumentId;
 
-    @NotNull(message = "gradeValue is required")
     @DecimalMin(value = "0.00", message = "gradeValue must be >= 0")
     @DecimalMax(value = "10.00", message = "gradeValue must be <= 10")
     private BigDecimal gradeValue;
+
+    @jakarta.validation.Valid
+    private List<ExerciseGradeEntryRequest> exerciseGrades;
 }

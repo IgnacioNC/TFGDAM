@@ -51,4 +51,7 @@ public class StudentEvaluationOverride {
 
     @Column(name = "all_ras_passed", nullable = false)
     private Boolean allRAsPassed;
+
+    @Column(name = "failed_ras_count", nullable = false)
+    private Integer failedRasCount;
 }

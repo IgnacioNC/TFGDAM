@@ -1,8 +1,9 @@
 package com.sara.tfgdam.service;
 
 import com.sara.tfgdam.repository.ActivityRepository;
-import com.sara.tfgdam.repository.CourseModuleRepository;
 import com.sara.tfgdam.repository.GradeRepository;
+import com.sara.tfgdam.repository.InstrumentExerciseGradeRepository;
+import com.sara.tfgdam.repository.InstrumentExerciseWeightRepository;
 import com.sara.tfgdam.repository.InstrumentRARepository;
 import com.sara.tfgdam.repository.InstrumentRepository;
 import com.sara.tfgdam.repository.LearningOutcomeRARepository;
@@ -20,17 +21,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CalculationServiceTest {
 
     private final CalculationService calculationService = new CalculationService(
-            (CourseModuleRepository) null,
             (LearningOutcomeRARepository) null,
             (TeachingUnitUTRepository) null,
             (UTRALinkRepository) null,
             (ActivityRepository) null,
             (InstrumentRepository) null,
             (InstrumentRARepository) null,
+            (InstrumentExerciseWeightRepository) null,
+            (InstrumentExerciseGradeRepository) null,
             (StudentRepository) null,
             (StudentEvaluationOverrideRepository) null,
             (GradeRepository) null,
-            (ConfigurationValidator) null
+            (ConfigurationValidator) null,
+            (ModuleAccessService) null
     );
 
     @Test

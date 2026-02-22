@@ -32,6 +32,10 @@ public class CourseModule {
     private String academicYear;
 
     @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "owner_user_id")
+    private UserAccount owner;
+
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "teacher_id")
     private Teacher teacher;
 }

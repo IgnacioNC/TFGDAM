@@ -1,12 +1,12 @@
 function LoginView({
   busy,
-  isAuthenticated,
   email,
   password,
   setEmail,
   setPassword,
   onLogin,
-  onLogout,
+  canRegister,
+  onRegister,
 }) {
   return (
     <section className="panel">
@@ -23,9 +23,11 @@ function LoginView({
         <button type="submit" disabled={busy}>
           Entrar
         </button>
-        <button type="button" onClick={onLogout} disabled={busy || !isAuthenticated}>
-          Salir
-        </button>
+        {canRegister && (
+          <button type="button" onClick={onRegister} disabled={busy}>
+            Crear cuenta
+          </button>
+        )}
       </form>
     </section>
   )

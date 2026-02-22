@@ -1,21 +1,28 @@
 package com.sara.tfgdam.service;
 
 import com.sara.tfgdam.domain.entity.Instrument;
+import com.sara.tfgdam.domain.entity.InstrumentRA;
+import com.sara.tfgdam.domain.entity.InstrumentExerciseWeight;
 import com.sara.tfgdam.domain.entity.LearningOutcomeRA;
 import com.sara.tfgdam.domain.entity.Student;
 import com.sara.tfgdam.domain.entity.StudentEvaluationOverride;
 import com.sara.tfgdam.domain.entity.TeachingUnitUT;
+import com.sara.tfgdam.domain.entity.CourseModule;
 import com.sara.tfgdam.dto.CreateInstrumentRequest;
 import com.sara.tfgdam.dto.CreateRARequest;
 import com.sara.tfgdam.dto.CreateStudentRequest;
 import com.sara.tfgdam.dto.CreateUTRequest;
 import com.sara.tfgdam.dto.ExcelImportRequest;
 import com.sara.tfgdam.dto.ExcelImportResponse;
+import com.sara.tfgdam.dto.ExerciseGradeEntryRequest;
 import com.sara.tfgdam.dto.GradeBatchRequest;
 import com.sara.tfgdam.dto.GradeEntryRequest;
 import com.sara.tfgdam.dto.SetInstrumentRAsRequest;
 import com.sara.tfgdam.dto.UpsertUTRALinkRequest;
 import com.sara.tfgdam.exception.BusinessValidationException;
+import com.sara.tfgdam.repository.CourseModuleRepository;
+import com.sara.tfgdam.repository.InstrumentExerciseWeightRepository;
+import com.sara.tfgdam.repository.InstrumentRARepository;
 import com.sara.tfgdam.repository.StudentEvaluationOverrideRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -28,6 +35,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.math.BigDecimal;
 
 @Service
 @RequiredArgsConstructor
@@ -35,16 +43,25 @@ public class ExcelJsonImportService {
 
     private final ModuleSetupService moduleSetupService;
     private final GradeService gradeService;
+    private final CourseModuleRepository courseModuleRepository;
+    private final InstrumentExerciseWeightRepository instrumentExerciseWeightRepository;
+    private final InstrumentRARepository instrumentRARepository;
     private final StudentEvaluationOverrideRepository studentEvaluationOverrideRepository;
 
     @Transactional
     public ExcelImportResponse importExcelJson(ExcelImportRequest request) {
+        return importExcelJson(request, null);
+    }
+
+    @Transactional
+    public ExcelImportResponse importExcelJson(ExcelImportRequest request, Long moduleId) {
         validatePayloadConsistency(request);
 
-        var module = moduleSetupService.createModule(request.getModule());
+        var module = resolveTargetModule(request, moduleId);
 
         Map<String, Long> raIdsByCode = new LinkedHashMap<>();
         Map<String, Long> raIdsByNormalizedCode = new LinkedHashMap<>();
+        Map<String, LearningOutcomeRA> rasByNormalizedCode = new LinkedHashMap<>();
         for (var item : request.getRas()) {
             CreateRARequest createRARequest = new CreateRARequest();
             createRARequest.setCode(item.getCode());
@@ -53,7 +70,9 @@ public class ExcelJsonImportService {
 
             LearningOutcomeRA ra = moduleSetupService.createRA(module.getId(), createRARequest);
             raIdsByCode.put(item.getCode().trim(), ra.getId());
-            raIdsByNormalizedCode.put(normalizeKey(item.getCode()), ra.getId());
+            String normalizedRaCode = normalizeKey(item.getCode());
+            raIdsByNormalizedCode.put(normalizedRaCode, ra.getId());
+            rasByNormalizedCode.put(normalizedRaCode, ra);
         }
 
         Map<String, Long> utIdsByKey = new LinkedHashMap<>();
@@ -115,6 +134,54 @@ public class ExcelJsonImportService {
                 setRequest.setRaIds(raIds);
                 moduleSetupService.setInstrumentRAs(instrument.getId(), setRequest);
 
+                List<ExcelImportRequest.UTRADistributionItem> instrumentRaDistributions =
+                        instrumentItem.getRaDistributions() == null ? List.of() : instrumentItem.getRaDistributions();
+                if (!instrumentRaDistributions.isEmpty()) {
+                    Map<Long, BigDecimal> percentByRaId = new LinkedHashMap<>();
+                    for (ExcelImportRequest.UTRADistributionItem distribution : instrumentRaDistributions) {
+                        Long raId = raIdsByNormalizedCode.get(normalizeKey(distribution.getRaCode()));
+                        if (raId == null) {
+                            throw new BusinessValidationException(
+                                    "RA code not found for instrument RA distribution: " + distribution.getRaCode()
+                            );
+                        }
+                        percentByRaId.merge(raId, distribution.getPercent(), BigDecimal::add);
+                    }
+
+                    List<InstrumentRA> links = instrumentRARepository.findByInstrumentId(instrument.getId());
+                    for (InstrumentRA link : links) {
+                        BigDecimal percent = percentByRaId.get(link.getLearningOutcome().getId());
+                        link.setPercent(percent);
+                    }
+                    instrumentRARepository.saveAll(links);
+                }
+
+                List<ExcelImportRequest.ExerciseWeightItem> exerciseWeights = instrumentItem.getExerciseWeights();
+                if (exerciseWeights != null && !exerciseWeights.isEmpty()) {
+                    instrumentExerciseWeightRepository.saveAll(
+                            exerciseWeights.stream()
+                                    .map(item -> {
+                                        LearningOutcomeRA linkedRa = null;
+                                        if (item.getRaCode() != null && !item.getRaCode().trim().isEmpty()) {
+                                            linkedRa = rasByNormalizedCode.get(normalizeKey(item.getRaCode()));
+                                            if (linkedRa == null) {
+                                                throw new BusinessValidationException(
+                                                        "exerciseWeight references unknown RA code: " + item.getRaCode()
+                                                );
+                                            }
+                                        }
+
+                                        return InstrumentExerciseWeight.builder()
+                                                .instrument(instrument)
+                                                .learningOutcome(linkedRa)
+                                                .exerciseIndex(item.getExerciseIndex())
+                                                .weightPercent(item.getWeightPercent())
+                                                .build();
+                                    })
+                                    .toList()
+                    );
+                }
+
                 String originalKey = instrumentItem.getKey().trim();
                 String normalizedKey = normalizeKey(originalKey);
                 instrumentIdsByKey.put(originalKey, instrument.getId());
@@ -148,6 +215,17 @@ public class ExcelJsonImportService {
                 gradeEntry.setStudentId(student.getId());
                 gradeEntry.setInstrumentId(instrumentId);
                 gradeEntry.setGradeValue(gradeItem.getGradeValue());
+                List<ExcelImportRequest.ExerciseGradeItem> exerciseGrades = gradeItem.getExerciseGrades();
+                if (exerciseGrades != null && !exerciseGrades.isEmpty()) {
+                    List<ExerciseGradeEntryRequest> mapped = new ArrayList<>();
+                    for (ExcelImportRequest.ExerciseGradeItem exercise : exerciseGrades) {
+                        ExerciseGradeEntryRequest mappedItem = new ExerciseGradeEntryRequest();
+                        mappedItem.setExerciseIndex(exercise.getExerciseIndex());
+                        mappedItem.setGradeValue(exercise.getGradeValue());
+                        mapped.add(mappedItem);
+                    }
+                    gradeEntry.setExerciseGrades(mapped);
+                }
                 gradeEntries.add(gradeEntry);
             }
         }
@@ -175,6 +253,7 @@ public class ExcelJsonImportService {
                         .numericGrade(item.getNumericGrade())
                         .suggestedBulletinGrade(item.getSuggestedBulletinGrade())
                         .allRAsPassed(item.getAllRAsPassed())
+                        .failedRasCount(resolveFailedRasCount(item))
                         .build());
             }
             studentEvaluationOverrideRepository.saveAll(overrides);
@@ -237,6 +316,44 @@ public class ExcelJsonImportService {
                         );
                     }
                 }
+                Set<String> instrumentRaCodes = instrument.getRaCodes().stream()
+                        .map(this::normalizeKey)
+                        .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+
+                List<ExcelImportRequest.UTRADistributionItem> raDistributions =
+                        instrument.getRaDistributions() == null ? List.of() : instrument.getRaDistributions();
+                Set<String> seenDistributionRaCodes = new LinkedHashSet<>();
+                for (ExcelImportRequest.UTRADistributionItem distribution : raDistributions) {
+                    String raCode = normalizeKey(distribution.getRaCode());
+                    if (!normalizedRaCodes.contains(raCode)) {
+                        throw new BusinessValidationException(
+                                "Instrument RA distribution references unknown RA code: " + distribution.getRaCode().trim()
+                        );
+                    }
+                    if (!instrumentRaCodes.contains(raCode)) {
+                        throw new BusinessValidationException(
+                                "Instrument RA distribution uses RA not linked in raCodes: "
+                                        + instrument.getKey().trim() + " -> " + distribution.getRaCode().trim()
+                        );
+                    }
+                    if (!seenDistributionRaCodes.add(raCode)) {
+                        throw new BusinessValidationException(
+                                "Duplicated RA distribution in instrument: " + instrument.getKey().trim() + " -> " + distribution.getRaCode().trim()
+                        );
+                    }
+                }
+
+                List<ExcelImportRequest.ExerciseWeightItem> exerciseWeights =
+                        instrument.getExerciseWeights() == null ? List.of() : instrument.getExerciseWeights();
+                Set<Integer> seenExerciseIndexes = new LinkedHashSet<>();
+                for (ExcelImportRequest.ExerciseWeightItem item : exerciseWeights) {
+                    if (!seenExerciseIndexes.add(item.getExerciseIndex())) {
+                        throw new BusinessValidationException(
+                                "Duplicated exercise weight index in instrument: "
+                                        + instrument.getKey().trim() + " -> " + item.getExerciseIndex()
+                        );
+                    }
+                }
             }
         }
 
@@ -255,6 +372,19 @@ public class ExcelJsonImportService {
                     throw new BusinessValidationException(
                             "Student grade references unknown instrumentKey: " + grade.getInstrumentKey().trim()
                     );
+                }
+
+                List<ExcelImportRequest.ExerciseGradeItem> exerciseGrades =
+                        grade.getExerciseGrades() == null ? List.of() : grade.getExerciseGrades();
+                Set<Integer> seenExerciseIndexes = new LinkedHashSet<>();
+                for (ExcelImportRequest.ExerciseGradeItem item : exerciseGrades) {
+                    if (!seenExerciseIndexes.add(item.getExerciseIndex())) {
+                        throw new BusinessValidationException(
+                                "Duplicated exercise grade index in student/instrument: "
+                                        + student.getStudentCode().trim() + "/" + grade.getInstrumentKey().trim()
+                                        + " -> " + item.getExerciseIndex()
+                        );
+                    }
                 }
             }
         }
@@ -291,5 +421,20 @@ public class ExcelJsonImportService {
             return "";
         }
         return value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private CourseModule resolveTargetModule(ExcelImportRequest request, Long moduleId) {
+        if (moduleId == null || !courseModuleRepository.existsById(moduleId)) {
+            return moduleSetupService.createModule(request.getModule());
+        }
+        return moduleSetupService.replaceModuleData(moduleId, request.getModule());
+    }
+
+    private Integer resolveFailedRasCount(ExcelImportRequest.EvaluationOverrideItem item) {
+        Integer fromPayload = item.getFailedRasCount();
+        if (fromPayload != null) {
+            return Math.max(0, fromPayload);
+        }
+        return Boolean.TRUE.equals(item.getAllRAsPassed()) ? 0 : 1;
     }
 }
