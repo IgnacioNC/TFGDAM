@@ -55,6 +55,9 @@ public class ExcelTemplateExportService {
     @Value("${sara.export.filled-template-path:${SARA_EXPORT_FILLED_TEMPLATE_PATH:./storage/templates/source_template_rellenada_unprotected.xlsx}}")
     private String filledTemplatePath;
 
+    @Value("${sara.export.filled-template-path-2:${SARA_EXPORT_FILLED_TEMPLATE_PATH_2:./storage/templates/source_template_rellenada2_unprotected.xlsx}}")
+    private String filledTemplatePath2;
+
     @Value("${sara.export.timeout-seconds:${SARA_EXPORT_TIMEOUT_SECONDS:120}}")
     private int timeoutSeconds;
 
@@ -67,22 +70,26 @@ public class ExcelTemplateExportService {
     private final TeachingUnitUTRepository teachingUnitUTRepository;
     private final ActivityRepository activityRepository;
     private final InstrumentRepository instrumentRepository;
+    private final ModuleAccessService moduleAccessService;
 
     public ExcelTemplateExportService(ExcelTemplateSnapshotService excelTemplateSnapshotService,
                                       CourseModuleRepository courseModuleRepository,
                                       LearningOutcomeRARepository learningOutcomeRARepository,
                                       TeachingUnitUTRepository teachingUnitUTRepository,
                                       ActivityRepository activityRepository,
-                                      InstrumentRepository instrumentRepository) {
+                                      InstrumentRepository instrumentRepository,
+                                      ModuleAccessService moduleAccessService) {
         this.excelTemplateSnapshotService = excelTemplateSnapshotService;
         this.courseModuleRepository = courseModuleRepository;
         this.learningOutcomeRARepository = learningOutcomeRARepository;
         this.teachingUnitUTRepository = teachingUnitUTRepository;
         this.activityRepository = activityRepository;
         this.instrumentRepository = instrumentRepository;
+        this.moduleAccessService = moduleAccessService;
     }
 
     public ExportedExcel exportModuleExcel(Long moduleId, String authorizationHeader, String baseUrl) {
+        moduleAccessService.assertCanAccessModule(moduleId);
         String token = extractBearerToken(authorizationHeader);
 
         Path script = Paths.get(exportScriptPath).toAbsolutePath().normalize();
@@ -169,9 +176,22 @@ public class ExcelTemplateExportService {
     }
 
     public ExportedExcel exportFilledTemplateExcel() {
-        Path template = Paths.get(filledTemplatePath).toAbsolutePath().normalize();
+        return exportFilledTemplateExcel(1);
+    }
+
+    public ExportedExcel exportFilledTemplateExcel(Integer variant) {
+        int selectedVariant = variant == null ? 1 : variant;
+        String selectedPath = switch (selectedVariant) {
+            case 1 -> filledTemplatePath;
+            case 2 -> filledTemplatePath2;
+            default -> throw new BusinessValidationException(
+                    "Invalid filled template variant: " + selectedVariant + ". Allowed values: 1 or 2"
+            );
+        };
+
+        Path template = Paths.get(selectedPath).toAbsolutePath().normalize();
         if (!Files.exists(template)) {
-            throw new BusinessValidationException("Filled export template not found: " + template);
+            throw new BusinessValidationException("Filled export template (variant " + selectedVariant + ") not found: " + template);
         }
 
         try {

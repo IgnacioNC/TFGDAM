@@ -76,6 +76,7 @@ public class ModuleSetupService {
     private final InstrumentExerciseWeightRepository instrumentExerciseWeightRepository;
     private final ImportJobRepository importJobRepository;
     private final ConfigurationValidator configurationValidator;
+    private final ModuleAccessService moduleAccessService;
 
     @Transactional
     public Teacher createTeacher(CreateTeacherRequest request) {
@@ -87,11 +88,13 @@ public class ModuleSetupService {
 
     @Transactional
     public CourseModule createModule(CreateModuleRequest request) {
+        var currentUser = moduleAccessService.getCurrentUser();
         Teacher teacher = resolveTeacher(request.getTeacherId(), request.getTeacherName());
 
         CourseModule module = CourseModule.builder()
                 .name(request.getName().trim())
                 .academicYear(request.getAcademicYear())
+                .owner(currentUser)
                 .teacher(teacher)
                 .build();
         return courseModuleRepository.save(module);
@@ -117,6 +120,11 @@ public class ModuleSetupService {
         CourseModule module = getModule(moduleId);
         clearModuleData(moduleId);
         courseModuleRepository.delete(module);
+    }
+
+    @Transactional(readOnly = true)
+    public List<CourseModule> getModules() {
+        return moduleAccessService.getAccessibleModules();
     }
 
     private void clearModuleData(Long moduleId) {
@@ -639,28 +647,35 @@ public class ModuleSetupService {
     }
 
     private CourseModule getModule(Long moduleId) {
-        return courseModuleRepository.findById(moduleId)
-                .orElseThrow(() -> new ResourceNotFoundException("Module not found: " + moduleId));
+        return moduleAccessService.getAccessibleModule(moduleId);
     }
 
     private LearningOutcomeRA getRA(Long raId) {
-        return learningOutcomeRARepository.findById(raId)
+        LearningOutcomeRA ra = learningOutcomeRARepository.findById(raId)
                 .orElseThrow(() -> new ResourceNotFoundException("RA not found: " + raId));
+        moduleAccessService.assertCanAccessModule(ra.getModule().getId());
+        return ra;
     }
 
     private TeachingUnitUT getUT(Long utId) {
-        return teachingUnitUTRepository.findById(utId)
+        TeachingUnitUT ut = teachingUnitUTRepository.findById(utId)
                 .orElseThrow(() -> new ResourceNotFoundException("UT not found: " + utId));
+        moduleAccessService.assertCanAccessModule(ut.getModule().getId());
+        return ut;
     }
 
     private Activity getActivityByUT(Long utId) {
-        return activityRepository.findByTeachingUnitId(utId)
+        Activity activity = activityRepository.findByTeachingUnitId(utId)
                 .orElseThrow(() -> new ResourceNotFoundException("Activity for UT not found: " + utId));
+        moduleAccessService.assertCanAccessModule(activity.getModule().getId());
+        return activity;
     }
 
     private Instrument getInstrument(Long instrumentId) {
-        return instrumentRepository.findDetailedById(instrumentId)
+        Instrument instrument = instrumentRepository.findDetailedById(instrumentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Instrument not found: " + instrumentId));
+        moduleAccessService.assertCanAccessModule(instrument.getActivity().getModule().getId());
+        return instrument;
     }
 
     private UTRALink getUTRALinkInModule(Long moduleId, Long linkId) {

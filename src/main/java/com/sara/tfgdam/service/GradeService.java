@@ -42,6 +42,7 @@ public class GradeService {
     private final InstrumentRepository instrumentRepository;
     private final InstrumentRARepository instrumentRARepository;
     private final ConfigurationValidator configurationValidator;
+    private final ModuleAccessService moduleAccessService;
 
     @Transactional
     public List<Grade> upsertGrades(GradeBatchRequest request) {
@@ -59,6 +60,8 @@ public class GradeService {
             if (!studentModuleId.equals(instrumentModuleId)) {
                 throw new BusinessValidationException("Student and instrument must belong to the same module");
             }
+
+            moduleAccessService.assertCanAccessModule(studentModuleId);
 
             if (instrumentRARepository.findByInstrumentId(instrument.getId()).isEmpty()) {
                 throw new BusinessValidationException(

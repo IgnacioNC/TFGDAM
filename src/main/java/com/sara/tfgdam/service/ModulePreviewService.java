@@ -4,9 +4,7 @@ import com.sara.tfgdam.domain.entity.Grade;
 import com.sara.tfgdam.domain.entity.InstrumentExerciseGrade;
 import com.sara.tfgdam.domain.entity.InstrumentExerciseWeight;
 import com.sara.tfgdam.dto.ModulePreviewResponse;
-import com.sara.tfgdam.exception.ResourceNotFoundException;
 import com.sara.tfgdam.repository.ActivityRepository;
-import com.sara.tfgdam.repository.CourseModuleRepository;
 import com.sara.tfgdam.repository.GradeRepository;
 import com.sara.tfgdam.repository.InstrumentExerciseGradeRepository;
 import com.sara.tfgdam.repository.InstrumentExerciseWeightRepository;
@@ -30,7 +28,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ModulePreviewService {
 
-    private final CourseModuleRepository courseModuleRepository;
+    private final ModuleAccessService moduleAccessService;
     private final LearningOutcomeRARepository learningOutcomeRARepository;
     private final TeachingUnitUTRepository teachingUnitUTRepository;
     private final UTRALinkRepository utraLinkRepository;
@@ -44,8 +42,7 @@ public class ModulePreviewService {
 
     @Transactional(readOnly = true)
     public ModulePreviewResponse getPreview(Long moduleId) {
-        var module = courseModuleRepository.findById(moduleId)
-                .orElseThrow(() -> new ResourceNotFoundException("Module not found: " + moduleId));
+        var module = moduleAccessService.getAccessibleModule(moduleId);
 
         var ras = learningOutcomeRARepository.findByModuleId(moduleId).stream()
                 .sorted(Comparator.comparing(ra -> ra.getCode().toLowerCase()))

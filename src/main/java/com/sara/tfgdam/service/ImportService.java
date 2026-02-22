@@ -4,7 +4,6 @@ import com.sara.tfgdam.domain.entity.ImportJob;
 import com.sara.tfgdam.domain.entity.ImportJobStatus;
 import com.sara.tfgdam.exception.BusinessValidationException;
 import com.sara.tfgdam.exception.ResourceNotFoundException;
-import com.sara.tfgdam.repository.CourseModuleRepository;
 import com.sara.tfgdam.repository.ImportJobRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,8 +20,8 @@ import java.nio.file.Paths;
 public class ImportService {
 
     private final ImportJobRepository importJobRepository;
-    private final CourseModuleRepository courseModuleRepository;
     private final ExtractorClient extractorClient;
+    private final ModuleAccessService moduleAccessService;
 
     @Value("${sara.import.storage-path:./storage/imports-ra}")
     private String importStoragePath;
@@ -65,8 +64,10 @@ public class ImportService {
     }
 
     public ImportJob getJob(Long jobId) {
-        return importJobRepository.findById(jobId)
+        ImportJob job = importJobRepository.findById(jobId)
                 .orElseThrow(() -> new ResourceNotFoundException("Import job not found: " + jobId));
+        moduleAccessService.assertCanAccessModule(job.getModuleId());
+        return job;
     }
 
     private void validateInput(Long moduleId, MultipartFile file) {
@@ -74,8 +75,7 @@ public class ImportService {
             throw new BusinessValidationException("moduleId is required");
         }
 
-        courseModuleRepository.findById(moduleId)
-                .orElseThrow(() -> new ResourceNotFoundException("Module not found: " + moduleId));
+        moduleAccessService.assertCanAccessModule(moduleId);
 
         if (file == null || file.isEmpty()) {
             throw new BusinessValidationException("file is required and cannot be empty");

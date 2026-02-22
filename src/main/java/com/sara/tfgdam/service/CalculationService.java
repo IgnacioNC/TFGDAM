@@ -4,6 +4,8 @@ import com.sara.tfgdam.domain.entity.Activity;
 import com.sara.tfgdam.domain.entity.CourseModule;
 import com.sara.tfgdam.domain.entity.Grade;
 import com.sara.tfgdam.domain.entity.Instrument;
+import com.sara.tfgdam.domain.entity.InstrumentExerciseGrade;
+import com.sara.tfgdam.domain.entity.InstrumentExerciseWeight;
 import com.sara.tfgdam.domain.entity.InstrumentRA;
 import com.sara.tfgdam.domain.entity.LearningOutcomeRA;
 import com.sara.tfgdam.domain.entity.Student;
@@ -21,8 +23,9 @@ import com.sara.tfgdam.dto.StudentReportResponse;
 import com.sara.tfgdam.exception.BusinessValidationException;
 import com.sara.tfgdam.exception.ResourceNotFoundException;
 import com.sara.tfgdam.repository.ActivityRepository;
-import com.sara.tfgdam.repository.CourseModuleRepository;
 import com.sara.tfgdam.repository.GradeRepository;
+import com.sara.tfgdam.repository.InstrumentExerciseGradeRepository;
+import com.sara.tfgdam.repository.InstrumentExerciseWeightRepository;
 import com.sara.tfgdam.repository.InstrumentRARepository;
 import com.sara.tfgdam.repository.InstrumentRepository;
 import com.sara.tfgdam.repository.LearningOutcomeRARepository;
@@ -58,17 +61,19 @@ public class CalculationService {
     private static final BigDecimal ONE = new BigDecimal("1.00");
     private static final BigDecimal FIVE = new BigDecimal("5.00");
 
-    private final CourseModuleRepository courseModuleRepository;
     private final LearningOutcomeRARepository learningOutcomeRARepository;
     private final TeachingUnitUTRepository teachingUnitUTRepository;
     private final UTRALinkRepository utraLinkRepository;
     private final ActivityRepository activityRepository;
     private final InstrumentRepository instrumentRepository;
     private final InstrumentRARepository instrumentRARepository;
+    private final InstrumentExerciseWeightRepository instrumentExerciseWeightRepository;
+    private final InstrumentExerciseGradeRepository instrumentExerciseGradeRepository;
     private final StudentRepository studentRepository;
     private final StudentEvaluationOverrideRepository studentEvaluationOverrideRepository;
     private final GradeRepository gradeRepository;
     private final ConfigurationValidator configurationValidator;
+    private final ModuleAccessService moduleAccessService;
 
     @Transactional(readOnly = true)
     public StudentReportResponse getStudentReport(Long studentId, Long moduleId) {
@@ -83,8 +88,11 @@ public class CalculationService {
 
         Map<Long, BigDecimal> gradeByInstrumentId = gradeRepository.findByStudentId(studentId).stream()
                 .collect(Collectors.toMap(g -> g.getInstrument().getId(), Grade::getGradeValue));
+        Map<Long, Map<Integer, BigDecimal>> exerciseGradesByInstrumentId = buildExerciseGradesByStudentId(
+                List.of(studentId)
+        ).getOrDefault(studentId, Map.of());
 
-        StudentComputation computation = computeForStudent(context, gradeByInstrumentId);
+        StudentComputation computation = computeForStudent(context, gradeByInstrumentId, exerciseGradesByInstrumentId);
 
         return StudentReportResponse.builder()
                 .studentId(student.getId())
@@ -109,6 +117,7 @@ public class CalculationService {
                 .toList();
 
         Map<Long, Map<Long, BigDecimal>> gradesByStudent = buildGradesByStudent(students);
+        Map<Long, Map<Long, Map<Integer, BigDecimal>>> exerciseGradesByStudent = buildExerciseGradesByStudent(students);
         Map<Long, StudentEvaluationOverride> overridesByStudentId = studentEvaluationOverrideRepository
                 .findByStudent_Module_IdAndEvaluationPeriod(moduleId, evaluationPeriod).stream()
                 .collect(Collectors.toMap(
@@ -135,7 +144,8 @@ public class CalculationService {
 
             StudentComputation computation = computeForStudent(
                     context,
-                    gradesByStudent.getOrDefault(student.getId(), Map.of())
+                    gradesByStudent.getOrDefault(student.getId(), Map.of()),
+                    exerciseGradesByStudent.getOrDefault(student.getId(), Map.of())
             );
 
             EvaluationResult result = computation.evaluationResults.get(evaluationPeriod);
@@ -165,13 +175,15 @@ public class CalculationService {
                 .toList();
 
         Map<Long, Map<Long, BigDecimal>> gradesByStudent = buildGradesByStudent(students);
+        Map<Long, Map<Long, Map<Integer, BigDecimal>>> exerciseGradesByStudent = buildExerciseGradesByStudent(students);
 
         List<StudentFinalReportRow> rows = new ArrayList<>();
 
         for (Student student : students) {
             StudentComputation computation = computeForStudent(
                     context,
-                    gradesByStudent.getOrDefault(student.getId(), Map.of())
+                    gradesByStudent.getOrDefault(student.getId(), Map.of()),
+                    exerciseGradesByStudent.getOrDefault(student.getId(), Map.of())
             );
 
             rows.add(StudentFinalReportRow.builder()
@@ -205,8 +217,7 @@ public class CalculationService {
     }
 
     private ModuleContext buildContext(Long moduleId) {
-        CourseModule module = courseModuleRepository.findById(moduleId)
-                .orElseThrow(() -> new ResourceNotFoundException("Module not found: " + moduleId));
+        CourseModule module = moduleAccessService.getAccessibleModule(moduleId);
 
         configurationValidator.validateModuleReadyForCalculations(moduleId);
 
@@ -227,8 +238,11 @@ public class CalculationService {
         List<Instrument> instruments = activityIds.isEmpty() ? List.of() : instrumentRepository.findByActivityIdIn(activityIds);
         List<Long> instrumentIds = instruments.stream().map(Instrument::getId).toList();
         List<InstrumentRA> instrumentRAs = instrumentIds.isEmpty() ? List.of() : instrumentRARepository.findByInstrumentIdIn(instrumentIds);
+        List<InstrumentExerciseWeight> exerciseWeights = instrumentIds.isEmpty()
+                ? List.of()
+                : instrumentExerciseWeightRepository.findByInstrumentIdIn(instrumentIds);
 
-        return new ModuleContext(module, ras, uts, utRaLinks, activities, instruments, instrumentRAs);
+        return new ModuleContext(module, ras, uts, utRaLinks, activities, instruments, instrumentRAs, exerciseWeights);
     }
 
     private Map<Long, Map<Long, BigDecimal>> buildGradesByStudent(List<Student> students) {
@@ -247,7 +261,35 @@ public class CalculationService {
         return byStudent;
     }
 
-    private StudentComputation computeForStudent(ModuleContext context, Map<Long, BigDecimal> gradeByInstrumentId) {
+    private Map<Long, Map<Long, Map<Integer, BigDecimal>>> buildExerciseGradesByStudent(List<Student> students) {
+        if (students.isEmpty()) {
+            return Map.of();
+        }
+
+        List<Long> studentIds = students.stream().map(Student::getId).toList();
+        return buildExerciseGradesByStudentId(studentIds);
+    }
+
+    private Map<Long, Map<Long, Map<Integer, BigDecimal>>> buildExerciseGradesByStudentId(List<Long> studentIds) {
+        if (studentIds == null || studentIds.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<Long, Map<Long, Map<Integer, BigDecimal>>> byStudent = new HashMap<>();
+
+        for (InstrumentExerciseGrade item : instrumentExerciseGradeRepository.findByStudent_IdIn(studentIds)) {
+            byStudent
+                    .computeIfAbsent(item.getStudent().getId(), ignored -> new HashMap<>())
+                    .computeIfAbsent(item.getInstrument().getId(), ignored -> new HashMap<>())
+                    .put(item.getExerciseIndex(), item.getGradeValue());
+        }
+
+        return byStudent;
+    }
+
+    private StudentComputation computeForStudent(ModuleContext context,
+                                                 Map<Long, BigDecimal> gradeByInstrumentId,
+                                                 Map<Long, Map<Integer, BigDecimal>> exerciseGradesByInstrumentId) {
         Map<Long, BigDecimal> activityGrades = new LinkedHashMap<>();
 
         for (Activity activity : context.activities) {
@@ -255,7 +297,11 @@ public class CalculationService {
             activityGrades.put(activity.getId(), grade);
         }
 
-        Map<UtRaKey, BigDecimal> utRaStudentGrades = calculateUtRaGrades(context, gradeByInstrumentId);
+        Map<UtRaKey, BigDecimal> utRaStudentGrades = calculateUtRaGrades(
+                context,
+                gradeByInstrumentId,
+                exerciseGradesByInstrumentId
+        );
 
         Map<Long, BigDecimal> raGlobalGrades = new LinkedHashMap<>();
         for (LearningOutcomeRA ra : context.ras) {
@@ -297,7 +343,8 @@ public class CalculationService {
     }
 
     private Map<UtRaKey, BigDecimal> calculateUtRaGrades(ModuleContext context,
-                                                          Map<Long, BigDecimal> gradeByInstrumentId) {
+                                                          Map<Long, BigDecimal> gradeByInstrumentId,
+                                                          Map<Long, Map<Integer, BigDecimal>> exerciseGradesByInstrumentId) {
         Map<UtRaKey, BigDecimal> result = new HashMap<>();
 
         for (UTRALink link : context.utRaLinks) {
@@ -312,17 +359,45 @@ public class CalculationService {
 
             BigDecimal numerator = ZERO;
             BigDecimal denominator = ZERO;
+            List<Instrument> instrumentsInActivity = context.instrumentsByActivityId.getOrDefault(activity.getId(), List.of());
+            boolean hasExplicitRaDistribution = instrumentsInActivity.stream()
+                    .map(instrument -> context.raPercentByInstrumentId
+                            .getOrDefault(instrument.getId(), Map.of())
+                            .get(raId))
+                    .filter(percent -> percent != null)
+                    .anyMatch(percent -> percent.compareTo(ZERO) > 0);
 
-            for (Instrument instrument : context.instrumentsByActivityId.getOrDefault(activity.getId(), List.of())) {
+            for (Instrument instrument : instrumentsInActivity) {
                 Set<Long> linkedRaIds = context.raIdsByInstrumentId.getOrDefault(instrument.getId(), Set.of());
-                if (!linkedRaIds.contains(raId)) {
+                boolean isInstrumentLinkedToRa = linkedRaIds.contains(raId);
+                BigDecimal weight;
+                if (hasExplicitRaDistribution) {
+                    weight = context.raPercentByInstrumentId
+                            .getOrDefault(instrument.getId(), Map.of())
+                            .getOrDefault(raId, ZERO);
+                    if (weight.compareTo(ZERO) <= 0) {
+                        continue;
+                    }
+                } else {
+                    weight = instrument.getWeightPercent();
+                }
+
+                BigDecimal instrumentRaGrade = calculateInstrumentRaGradeFromExercises(
+                        context,
+                        instrument.getId(),
+                        raId,
+                        exerciseGradesByInstrumentId.getOrDefault(instrument.getId(), Map.of())
+                );
+
+                if (instrumentRaGrade == null && !isInstrumentLinkedToRa) {
                     continue;
                 }
 
-                BigDecimal instrumentGrade = gradeByInstrumentId.getOrDefault(instrument.getId(), ZERO);
-                BigDecimal weight = instrument.getWeightPercent();
+                if (instrumentRaGrade == null) {
+                    instrumentRaGrade = gradeByInstrumentId.getOrDefault(instrument.getId(), ZERO);
+                }
 
-                numerator = numerator.add(instrumentGrade.multiply(weight));
+                numerator = numerator.add(instrumentRaGrade.multiply(weight));
                 denominator = denominator.add(weight);
             }
 
@@ -337,6 +412,43 @@ public class CalculationService {
         }
 
         return result;
+    }
+
+    private BigDecimal calculateInstrumentRaGradeFromExercises(ModuleContext context,
+                                                               Long instrumentId,
+                                                               Long raId,
+                                                               Map<Integer, BigDecimal> exerciseGrades) {
+        List<InstrumentExerciseWeight> weights = context.exerciseWeightsByInstrumentId
+                .getOrDefault(instrumentId, List.of());
+        if (weights.isEmpty()) {
+            return null;
+        }
+
+        BigDecimal weighted = ZERO;
+        BigDecimal totalWeight = ZERO;
+
+        for (InstrumentExerciseWeight weight : weights) {
+            if (weight.getLearningOutcome() == null
+                    || weight.getLearningOutcome().getId() == null
+                    || !raId.equals(weight.getLearningOutcome().getId())) {
+                continue;
+            }
+
+            BigDecimal weightPercent = weight.getWeightPercent();
+            if (weightPercent == null || weightPercent.compareTo(ZERO) <= 0) {
+                continue;
+            }
+
+            BigDecimal gradeValue = exerciseGrades.getOrDefault(weight.getExerciseIndex(), ZERO);
+            weighted = weighted.add(gradeValue.multiply(weightPercent));
+            totalWeight = totalWeight.add(weightPercent);
+        }
+
+        if (totalWeight.compareTo(ZERO) <= 0) {
+            return null;
+        }
+
+        return weighted.divide(totalWeight, 8, RoundingMode.HALF_UP);
     }
 
     private Map<Integer, EvaluationResult> calculateEvaluationResults(ModuleContext context,
@@ -361,6 +473,10 @@ public class CalculationService {
                 if (ra == null) {
                     continue;
                 }
+                BigDecimal raWeight = ra.getWeightPercent();
+                if (raWeight == null || raWeight.compareTo(ZERO) <= 0) {
+                    continue;
+                }
 
                 List<UTRALink> linksInEval = context.utRaLinksByEvaluationAndRa
                         .getOrDefault(evaluationPeriod, Map.of())
@@ -369,26 +485,27 @@ public class CalculationService {
                 BigDecimal percentSum = linksInEval.stream()
                         .map(UTRALink::getPercent)
                         .reduce(BigDecimal.ZERO, BigDecimal::add);
+                if (percentSum.compareTo(ZERO) <= 0) {
+                    continue;
+                }
 
                 BigDecimal raEvalGrade = ZERO;
-                if (percentSum.compareTo(ZERO) > 0) {
-                    BigDecimal numerator = ZERO;
-                    for (UTRALink link : linksInEval) {
-                        BigDecimal utRaGrade = utRaStudentGrades.getOrDefault(
-                                new UtRaKey(link.getTeachingUnit().getId(), raId),
-                                ZERO
-                        );
-                        numerator = numerator.add(utRaGrade.multiply(link.getPercent()));
-                    }
-                    raEvalGrade = numerator.divide(percentSum, 8, RoundingMode.HALF_UP);
+                BigDecimal numerator = ZERO;
+                for (UTRALink link : linksInEval) {
+                    BigDecimal utRaGrade = utRaStudentGrades.getOrDefault(
+                            new UtRaKey(link.getTeachingUnit().getId(), raId),
+                            ZERO
+                    );
+                    numerator = numerator.add(utRaGrade.multiply(link.getPercent()));
                 }
+                raEvalGrade = numerator.divide(percentSum, 8, RoundingMode.HALF_UP);
 
                 if (raEvalGrade.compareTo(FIVE) < 0) {
                     allPassed = false;
                 }
 
-                weightedSum = weightedSum.add(raEvalGrade.multiply(ra.getWeightPercent()));
-                totalRaWeight = totalRaWeight.add(ra.getWeightPercent());
+                weightedSum = weightedSum.add(raEvalGrade.multiply(raWeight));
+                totalRaWeight = totalRaWeight.add(raWeight);
             }
 
             BigDecimal numericGrade = totalRaWeight.compareTo(ZERO) > 0
@@ -463,12 +580,15 @@ public class CalculationService {
         private final List<Activity> activities;
         private final List<Instrument> instruments;
         private final List<InstrumentRA> instrumentRAs;
+        private final List<InstrumentExerciseWeight> exerciseWeights;
 
         private final Map<Long, LearningOutcomeRA> raById;
         private final Map<Long, List<UTRALink>> utRaLinksByRaId;
         private final Map<Long, Activity> activityByUtId;
         private final Map<Long, List<Instrument>> instrumentsByActivityId;
         private final Map<Long, Set<Long>> raIdsByInstrumentId;
+        private final Map<Long, Map<Long, BigDecimal>> raPercentByInstrumentId;
+        private final Map<Long, List<InstrumentExerciseWeight>> exerciseWeightsByInstrumentId;
         private final Set<Integer> evaluationPeriods;
         private final Map<Integer, Set<Long>> raIdsByEvaluation;
         private final Map<Integer, Map<Long, List<UTRALink>>> utRaLinksByEvaluationAndRa;
@@ -479,7 +599,8 @@ public class CalculationService {
                               List<UTRALink> utRaLinks,
                               List<Activity> activities,
                               List<Instrument> instruments,
-                              List<InstrumentRA> instrumentRAs) {
+                              List<InstrumentRA> instrumentRAs,
+                              List<InstrumentExerciseWeight> exerciseWeights) {
             this.module = module;
             this.ras = ras;
             this.uts = uts;
@@ -487,6 +608,7 @@ public class CalculationService {
             this.activities = activities;
             this.instruments = instruments;
             this.instrumentRAs = instrumentRAs;
+            this.exerciseWeights = exerciseWeights;
 
             this.raById = ras.stream().collect(Collectors.toMap(LearningOutcomeRA::getId, ra -> ra));
 
@@ -500,11 +622,23 @@ public class CalculationService {
                     .collect(Collectors.groupingBy(instrument -> instrument.getActivity().getId()));
 
             this.raIdsByInstrumentId = new HashMap<>();
+            this.raPercentByInstrumentId = new HashMap<>();
             for (InstrumentRA link : instrumentRAs) {
                 this.raIdsByInstrumentId
                         .computeIfAbsent(link.getInstrument().getId(), k -> new LinkedHashSet<>())
                         .add(link.getLearningOutcome().getId());
+                if (link.getPercent() != null) {
+                    this.raPercentByInstrumentId
+                            .computeIfAbsent(link.getInstrument().getId(), k -> new LinkedHashMap<>())
+                            .put(link.getLearningOutcome().getId(), link.getPercent());
+                }
             }
+
+            this.exerciseWeightsByInstrumentId = exerciseWeights.stream()
+                    .collect(Collectors.groupingBy(weight -> weight.getInstrument().getId()));
+            this.exerciseWeightsByInstrumentId.values().forEach(list ->
+                    list.sort(Comparator.comparing(InstrumentExerciseWeight::getExerciseIndex))
+            );
 
             Map<Long, Integer> utEvaluationMap = uts.stream()
                     .collect(Collectors.toMap(TeachingUnitUT::getId, TeachingUnitUT::getEvaluationPeriod));
