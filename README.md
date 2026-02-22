@@ -23,6 +23,8 @@ No se usa Flyway/Liquibase en este repo. El esquema se crea con JPA (`spring.jpa
 export SPRING_DATASOURCE_URL='jdbc:mysql://localhost:3306/sara?createDatabaseIfNotExist=true&serverTimezone=UTC'
 export SPRING_DATASOURCE_USERNAME='root'
 export SPRING_DATASOURCE_PASSWORD=''
+export SARA_GOOGLE_CLIENT_IDS='tu-client-id-web.apps.googleusercontent.com'
+# opcional: export SARA_GOOGLE_ALLOWED_DOMAIN='colegiomiralmonte.es'
 ```
 
 3. Ejecuta:
@@ -33,7 +35,7 @@ export SPRING_DATASOURCE_PASSWORD=''
 
 Si la base esta vacia, se insertan datos demo automaticamente con `CommandLineRunner`.
 
-Todas las rutas, salvo `POST /auth/login`, requieren `Authorization: Bearer <token>`.
+Todas las rutas, salvo `POST /auth/login` y `POST /auth/google`, requieren `Authorization: Bearer <token>`.
 
 ## Endpoints principales
 
@@ -87,6 +89,7 @@ Todas las rutas, salvo `POST /auth/login`, requieren `Authorization: Bearer <tok
 ### Auth y usuarios
 
 - `POST /auth/login` (publico)
+- `POST /auth/google` (publico, valida `id_token` de Google y solo acepta `@colegiomiralmonte.es`)
 - `POST /users` (SUPERADMIN y DIRECTOR)
 - `PATCH /users/{id}/activate` (SUPERADMIN y DIRECTOR sobre profesores)
 - `PATCH /users/{id}/disable` (SUPERADMIN y DIRECTOR sobre profesores)
@@ -262,7 +265,19 @@ curl -X POST http://localhost:8080/imports/excel-file \
 Notas sobre importacion desde plantilla:
 
 - Se toman `Datos Iniciales` y `Actividades` para crear modulo, RAs, UTs, instrumentos, alumnos y notas.
+- La importacion valida sumas exactas al 100%:
+  - pesos RA del modulo,
+  - reparto UT-RA por cada RA,
+  - pesos de instrumentos dentro de cada UT,
+  - `raDistributions` de cada instrumento (si se informa),
+  - `exerciseWeights` de cada instrumento (si se informa).
+- Validaciones adicionales de coherencia:
+  - `raDistributions` de instrumento debe cubrir todos sus `raCodes`.
+  - `exerciseWeights.raCode` (cuando viene) debe pertenecer a los `raCodes` del instrumento.
+  - no se permiten notas duplicadas del mismo alumno para el mismo instrumento.
+  - si se informan `exerciseGrades`, sus indices deben existir en `exerciseWeights`.
 - Si existe la hoja `Evaluaciones`, tambien se importan los valores de evaluacion por alumno (`nota numerica`, `boletin sugerido`, `RAs superados`) como overrides por evaluacion.
+- Los alumnos detectados en `Datos Iniciales` se importan aunque no tengan notas en `Actividades`.
 - En `GET /modules/{id}/reports/evaluation/{n}`, si hay override para alumno+evaluacion se muestra ese valor; si no, se usa el calculo dinamico.
 - Al importar por `POST /imports/excel-file`, se guarda una copia del `.xlsx` original por modulo en `storage/imports-ra/module-{id}-source-template.xlsx`.
 - En `POST /imports/excel-file`, si `moduleId` existe y es accesible para el usuario actual se reemplazan sus datos; si no existe o viene vacio, se crea modulo nuevo.
@@ -359,6 +374,29 @@ curl -X PATCH http://localhost:8080/users/3/activate \
 ```
 
 Nota: sustituye `3` por el `id` real del profesor devuelto al crearlo.
+
+### Login con Google (opcional)
+
+Configuracion minima en backend:
+
+- `SARA_GOOGLE_CLIENT_IDS`: uno o varios client IDs de Google (separados por coma).
+- `SARA_GOOGLE_ALLOWED_DOMAIN`: dominio permitido (por defecto `colegiomiralmonte.es`).
+
+Ejemplo de login:
+
+```bash
+curl -X POST http://localhost:8080/auth/google \
+  -H 'Content-Type: application/json' \
+  -d '{"idToken":"<GOOGLE_ID_TOKEN>"}'
+```
+
+Reglas aplicadas:
+
+- El token debe ser valido y no expirado.
+- `aud` debe coincidir con alguno de `SARA_GOOGLE_CLIENT_IDS`.
+- `email_verified` debe ser verdadero.
+- El email debe terminar en `@colegiomiralmonte.es` (o dominio configurado).
+- `hd` debe coincidir con el dominio permitido.
 
 ## Reglas de consistencia implementadas
 

@@ -1,0 +1,137 @@
+{
+  "module": {
+    "name": "Test Import Valid 01",
+    "academicYear": "2025-2026",
+    "teacherName": "Docente Prueba"
+  },
+  "ras": [
+    {
+      "code": "RA1",
+      "name": "Resultado 1",
+      "weightPercent": 60.0
+    },
+    {
+      "code": "RA2",
+      "name": "Resultado 2",
+      "weightPercent": 40.0
+    }
+  ],
+  "uts": [
+    {
+      "key": "UT1",
+      "name": "UT1",
+      "evaluationPeriod": 1,
+      "raDistributions": [
+        {
+          "raCode": "RA1",
+          "percent": 50.0
+        },
+        {
+          "raCode": "RA2",
+          "percent": 50.0
+        }
+      ],
+      "instruments": [
+        {
+          "key": "I1",
+          "name": "Examen UT1",
+          "weightPercent": 50.0,
+          "raCodes": [
+            "RA1",
+            "RA2"
+          ],
+          "raDistributions": [
+            {
+              "raCode": "RA1",
+              "percent": 50.0
+            },
+            {
+              "raCode": "RA2",
+              "percent": 50.0
+            }
+          ]
+        },
+        {
+          "key": "I2",
+          "name": "Practica UT1",
+          "weightPercent": 50.0,
+          "raCodes": [
+            "RA1",
+            "RA2"
+          ],
+          "raDistributions": [
+            {
+              "raCode": "RA1",
+              "percent": 50.0
+            },
+            {
+              "raCode": "RA2",
+              "percent": 50.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "UT2",
+      "name": "UT2",
+      "evaluationPeriod": 2,
+      "raDistributions": [
+        {
+          "raCode": "RA1",
+          "percent": 50.0
+        },
+        {
+          "raCode": "RA2",
+          "percent": 50.0
+        }
+      ],
+      "instruments": [
+        {
+          "key": "I3",
+          "name": "Proyecto UT2",
+          "weightPercent": 100.0,
+          "raCodes": [
+            "RA1",
+            "RA2"
+          ],
+          "raDistributions": [
+            {
+              "raCode": "RA1",
+              "percent": 50.0
+            },
+            {
+              "raCode": "RA2",
+              "percent": 50.0
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "students": [
+    {
+      "studentCode": "A001",
+      "fullName": "Alumno Sin Notas",
+      "grades": []
+    },
+    {
+      "studentCode": "A002",
+      "fullName": "Alumno Con Notas",
+      "grades": [
+        {
+          "instrumentKey": "I1",
+          "gradeValue": 7.5
+        },
+        {
+          "instrumentKey": "I2",
+          "gradeValue": 6.75
+        },
+        {
+          "instrumentKey": "I3",
+          "gradeValue": 8.2
+        }
+      ]
+    }
+  ]
+}

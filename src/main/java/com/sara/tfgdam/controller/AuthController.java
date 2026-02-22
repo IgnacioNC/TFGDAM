@@ -2,6 +2,7 @@ package com.sara.tfgdam.controller;
 
 import com.sara.tfgdam.dto.LoginRequest;
 import com.sara.tfgdam.dto.LoginResponse;
+import com.sara.tfgdam.dto.GoogleLoginRequest;
 import com.sara.tfgdam.service.AuthService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -20,5 +21,10 @@ public class AuthController {
     @PostMapping("/login")
     public LoginResponse login(@Valid @RequestBody LoginRequest request) {
         return authService.login(request);
+    }
+
+    @PostMapping("/google")
+    public LoginResponse googleLogin(@Valid @RequestBody GoogleLoginRequest request) {
+        return authService.googleLogin(request);
     }
 }

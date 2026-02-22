@@ -38,6 +38,12 @@ Registro opcional (solo si el backend expone ese endpoint):
 VITE_AUTH_REGISTER_PATH=/auth/register
 ```
 
+Login con Google (opcional):
+
+```bash
+VITE_GOOGLE_CLIENT_ID=tu-client-id.apps.googleusercontent.com
+```
+
 ## Flujo actual
 
 1. Login con JWT (`/auth/login`) y logout local (limpieza de token en frontend).
@@ -65,6 +71,7 @@ VITE_AUTH_REGISTER_PATH=/auth/register
 ## Endpoints consumidos
 
 - `POST /auth/login`
+- `POST /auth/google` (opcional, requiere `VITE_GOOGLE_CLIENT_ID` y backend configurado)
 - `POST ${VITE_AUTH_REGISTER_PATH}` (opcional, solo si se configura)
 - `GET /modules`
 - `DELETE /modules/{id}`

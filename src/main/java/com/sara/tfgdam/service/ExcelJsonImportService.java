@@ -274,17 +274,31 @@ public class ExcelJsonImportService {
     }
 
     private void validatePayloadConsistency(ExcelImportRequest request) {
+        BigDecimal hundred = new BigDecimal("100.00");
+
         Set<String> normalizedRaCodes = new LinkedHashSet<>();
+        Map<String, String> displayRaCodesByNormalizedCode = new LinkedHashMap<>();
+        BigDecimal raWeightSum = BigDecimal.ZERO;
         for (var ra : request.getRas()) {
             String code = normalizeKey(ra.getCode());
             if (!normalizedRaCodes.add(code)) {
                 throw new BusinessValidationException("Duplicated RA code in payload: " + ra.getCode().trim());
             }
+            displayRaCodesByNormalizedCode.put(code, ra.getCode().trim());
+            raWeightSum = raWeightSum.add(ra.getWeightPercent());
+        }
+        if (raWeightSum.compareTo(hundred) != 0) {
+            throw new BusinessValidationException("Sum of RA weights must be exactly 100. Current=" + raWeightSum);
         }
 
         Set<String> normalizedUtKeys = new LinkedHashSet<>();
         Set<Integer> evaluationPeriods = new LinkedHashSet<>();
         Set<String> normalizedInstrumentKeys = new LinkedHashSet<>();
+        Map<String, Set<Integer>> exerciseWeightIndexesByInstrumentKey = new LinkedHashMap<>();
+        Map<String, BigDecimal> utDistributionSumByRaCode = new LinkedHashMap<>();
+        for (String raCode : normalizedRaCodes) {
+            utDistributionSumByRaCode.put(raCode, BigDecimal.ZERO);
+        }
 
         for (var ut : request.getUts()) {
             String utKey = normalizeKey(ut.getKey());
@@ -292,6 +306,7 @@ public class ExcelJsonImportService {
                 throw new BusinessValidationException("Duplicated UT key in payload: " + ut.getKey().trim());
             }
             evaluationPeriods.add(ut.getEvaluationPeriod());
+            BigDecimal instrumentWeightSum = BigDecimal.ZERO;
 
             for (var distribution : ut.getRaDistributions()) {
                 String raCode = normalizeKey(distribution.getRaCode());
@@ -300,6 +315,7 @@ public class ExcelJsonImportService {
                             "UT-RA distribution references unknown RA code: " + distribution.getRaCode().trim()
                     );
                 }
+                utDistributionSumByRaCode.merge(raCode, distribution.getPercent(), BigDecimal::add);
             }
 
             for (var instrument : ut.getInstruments()) {
@@ -307,6 +323,7 @@ public class ExcelJsonImportService {
                 if (!normalizedInstrumentKeys.add(instrumentKey)) {
                     throw new BusinessValidationException("Duplicated instrument key in payload: " + instrument.getKey().trim());
                 }
+                instrumentWeightSum = instrumentWeightSum.add(instrument.getWeightPercent());
 
                 for (String raCodeRaw : instrument.getRaCodes()) {
                     String raCode = normalizeKey(raCodeRaw);
@@ -323,6 +340,7 @@ public class ExcelJsonImportService {
                 List<ExcelImportRequest.UTRADistributionItem> raDistributions =
                         instrument.getRaDistributions() == null ? List.of() : instrument.getRaDistributions();
                 Set<String> seenDistributionRaCodes = new LinkedHashSet<>();
+                BigDecimal instrumentRaDistributionSum = BigDecimal.ZERO;
                 for (ExcelImportRequest.UTRADistributionItem distribution : raDistributions) {
                     String raCode = normalizeKey(distribution.getRaCode());
                     if (!normalizedRaCodes.contains(raCode)) {
@@ -341,11 +359,29 @@ public class ExcelJsonImportService {
                                 "Duplicated RA distribution in instrument: " + instrument.getKey().trim() + " -> " + distribution.getRaCode().trim()
                         );
                     }
+                    instrumentRaDistributionSum = instrumentRaDistributionSum.add(distribution.getPercent());
+                }
+                if (!raDistributions.isEmpty()) {
+                    if (instrumentRaDistributionSum.compareTo(hundred) != 0) {
+                        throw new BusinessValidationException(
+                                "Instrument RA distribution must sum exactly 100: "
+                                        + instrument.getKey().trim() + " -> " + instrumentRaDistributionSum
+                        );
+                    }
+                    if (!seenDistributionRaCodes.equals(instrumentRaCodes)) {
+                        Set<String> missingRaCodes = new LinkedHashSet<>(instrumentRaCodes);
+                        missingRaCodes.removeAll(seenDistributionRaCodes);
+                        throw new BusinessValidationException(
+                                "Instrument RA distribution must include all instrument raCodes: "
+                                        + instrument.getKey().trim() + " missing=" + missingRaCodes
+                        );
+                    }
                 }
 
                 List<ExcelImportRequest.ExerciseWeightItem> exerciseWeights =
                         instrument.getExerciseWeights() == null ? List.of() : instrument.getExerciseWeights();
                 Set<Integer> seenExerciseIndexes = new LinkedHashSet<>();
+                BigDecimal exerciseWeightSum = BigDecimal.ZERO;
                 for (ExcelImportRequest.ExerciseWeightItem item : exerciseWeights) {
                     if (!seenExerciseIndexes.add(item.getExerciseIndex())) {
                         throw new BusinessValidationException(
@@ -353,7 +389,40 @@ public class ExcelJsonImportService {
                                         + instrument.getKey().trim() + " -> " + item.getExerciseIndex()
                         );
                     }
+                    exerciseWeightSum = exerciseWeightSum.add(item.getWeightPercent());
+                    if (item.getRaCode() != null && !item.getRaCode().trim().isEmpty()) {
+                        String exerciseRaCode = normalizeKey(item.getRaCode());
+                        if (!instrumentRaCodes.contains(exerciseRaCode)) {
+                            throw new BusinessValidationException(
+                                    "exerciseWeight RA code is not linked to instrument: "
+                                            + instrument.getKey().trim() + " -> " + item.getRaCode().trim()
+                            );
+                        }
+                    }
                 }
+                if (!exerciseWeights.isEmpty() && exerciseWeightSum.compareTo(hundred) != 0) {
+                    throw new BusinessValidationException(
+                            "Exercise weights in instrument must sum exactly 100: "
+                                    + instrument.getKey().trim() + " -> " + exerciseWeightSum
+                    );
+                }
+                exerciseWeightIndexesByInstrumentKey.put(instrumentKey, seenExerciseIndexes);
+            }
+
+            if (instrumentWeightSum.compareTo(hundred) != 0) {
+                throw new BusinessValidationException(
+                        "Instrument weights in UT must sum exactly 100: "
+                                + ut.getKey().trim() + " -> " + instrumentWeightSum
+                );
+            }
+        }
+
+        for (var entry : utDistributionSumByRaCode.entrySet()) {
+            if (entry.getValue().compareTo(hundred) != 0) {
+                String displayRaCode = displayRaCodesByNormalizedCode.getOrDefault(entry.getKey(), entry.getKey());
+                throw new BusinessValidationException(
+                        "UT-RA distribution must sum exactly 100 for " + displayRaCode + ". Current=" + entry.getValue()
+                );
             }
         }
 
@@ -366,6 +435,7 @@ public class ExcelJsonImportService {
             }
 
             List<ExcelImportRequest.GradeItem> grades = student.getGrades() == null ? List.of() : student.getGrades();
+            Set<String> gradeInstrumentKeysForStudent = new LinkedHashSet<>();
             for (var grade : grades) {
                 String instrumentKey = normalizeKey(grade.getInstrumentKey());
                 if (!normalizedInstrumentKeys.contains(instrumentKey)) {
@@ -373,14 +443,34 @@ public class ExcelJsonImportService {
                             "Student grade references unknown instrumentKey: " + grade.getInstrumentKey().trim()
                     );
                 }
+                if (!gradeInstrumentKeysForStudent.add(instrumentKey)) {
+                    throw new BusinessValidationException(
+                            "Duplicated grade for student/instrument: "
+                                    + student.getStudentCode().trim() + "/" + grade.getInstrumentKey().trim()
+                    );
+                }
 
                 List<ExcelImportRequest.ExerciseGradeItem> exerciseGrades =
                         grade.getExerciseGrades() == null ? List.of() : grade.getExerciseGrades();
                 Set<Integer> seenExerciseIndexes = new LinkedHashSet<>();
+                Set<Integer> allowedExerciseIndexes = exerciseWeightIndexesByInstrumentKey.getOrDefault(instrumentKey, Set.of());
                 for (ExcelImportRequest.ExerciseGradeItem item : exerciseGrades) {
                     if (!seenExerciseIndexes.add(item.getExerciseIndex())) {
                         throw new BusinessValidationException(
                                 "Duplicated exercise grade index in student/instrument: "
+                                        + student.getStudentCode().trim() + "/" + grade.getInstrumentKey().trim()
+                                        + " -> " + item.getExerciseIndex()
+                        );
+                    }
+                    if (allowedExerciseIndexes.isEmpty()) {
+                        throw new BusinessValidationException(
+                                "Exercise grades provided for instrument without exerciseWeights: "
+                                        + grade.getInstrumentKey().trim()
+                        );
+                    }
+                    if (!allowedExerciseIndexes.contains(item.getExerciseIndex())) {
+                        throw new BusinessValidationException(
+                                "Exercise grade index not configured in instrument exerciseWeights: "
                                         + student.getStudentCode().trim() + "/" + grade.getInstrumentKey().trim()
                                         + " -> " + item.getExerciseIndex()
                         );

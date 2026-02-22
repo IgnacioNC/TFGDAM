@@ -39,6 +39,7 @@ function App() {
   const isAuthenticated = useMemo(() => Boolean(token), [token])
   const registerPath = useMemo(() => String(import.meta.env.VITE_AUTH_REGISTER_PATH || '').trim(), [])
   const canRegister = useMemo(() => Boolean(registerPath), [registerPath])
+  const googleClientId = useMemo(() => String(import.meta.env.VITE_GOOGLE_CLIENT_ID || '').trim(), [])
 
   const navigate = useCallback((nextRoute) => {
     window.location.hash = nextRoute
@@ -123,6 +124,30 @@ function App() {
       pushLog('Cuenta creada. Ya puedes iniciar sesion.')
     } catch (error) {
       pushLog(normalizeError(error, 'No se pudo crear la cuenta.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const loginWithGoogleCredential = async (googleIdToken) => {
+    if (!googleIdToken) {
+      pushLog('Google no devolvio credencial de acceso.')
+      return
+    }
+
+    setBusy(true)
+    try {
+      const response = await apiRequest('/auth/google', {
+        method: 'POST',
+        body: { idToken: googleIdToken },
+      })
+      const accessToken = response.accessToken || ''
+      setToken(accessToken)
+      localStorage.setItem('sara_token', accessToken)
+      pushLog(`Sesion iniciada con Google: ${response.email || ''}`)
+      navigate(ROUTES.modules)
+    } catch (error) {
+      pushLog(normalizeError(error, 'No se pudo iniciar sesion con Google.'))
     } finally {
       setBusy(false)
     }
@@ -577,6 +602,8 @@ function App() {
           onLogin={login}
           canRegister={canRegister}
           onRegister={register}
+          googleClientId={googleClientId}
+          onGoogleCredential={loginWithGoogleCredential}
         />
       )}
 

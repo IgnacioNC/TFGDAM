@@ -1,0 +1,89 @@
+{
+  "module": {
+    "name": "Test Import Invalid 03",
+    "academicYear": "2025-2026",
+    "teacherName": "Docente Prueba"
+  },
+  "ras": [
+    {
+      "code": "RA1",
+      "name": "Resultado 1",
+      "weightPercent": 60.0
+    },
+    {
+      "code": "RA2",
+      "name": "Resultado 2",
+      "weightPercent": 40.0
+    }
+  ],
+  "uts": [
+    {
+      "key": "UT1",
+      "name": "UT1",
+      "evaluationPeriod": 1,
+      "raDistributions": [
+        {
+          "raCode": "RA1",
+          "percent": 50.0
+        },
+        {
+          "raCode": "RA2",
+          "percent": 50.0
+        }
+      ],
+      "instruments": [
+        {
+          "key": "I1",
+          "name": "Examen UT1",
+          "weightPercent": 70.0,
+          "raCodes": [
+            "RA1",
+            "RA2"
+          ]
+        },
+        {
+          "key": "I2",
+          "name": "Practica UT1",
+          "weightPercent": 20.0,
+          "raCodes": [
+            "RA1",
+            "RA2"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "UT2",
+      "name": "UT2",
+      "evaluationPeriod": 2,
+      "raDistributions": [
+        {
+          "raCode": "RA1",
+          "percent": 50.0
+        },
+        {
+          "raCode": "RA2",
+          "percent": 50.0
+        }
+      ],
+      "instruments": [
+        {
+          "key": "I3",
+          "name": "Proyecto UT2",
+          "weightPercent": 100.0,
+          "raCodes": [
+            "RA1",
+            "RA2"
+          ]
+        }
+      ]
+    }
+  ],
+  "students": [
+    {
+      "studentCode": "A001",
+      "fullName": "Alumno Test",
+      "grades": []
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "module": {
+    "name": "Test Import Valid 06",
+    "academicYear": "2025-2026",
+    "teacherName": "Docente Prueba"
+  },
+  "ras": [
+    { "code": "RA1", "name": "Resultado 1", "weightPercent": 60.0 },
+    { "code": "RA2", "name": "Resultado 2", "weightPercent": 40.0 }
+  ],
+  "uts": [
+    {
+      "key": "UT1",
+      "name": "UT1",
+      "evaluationPeriod": 1,
+      "raDistributions": [
+        { "raCode": "RA1", "percent": 100.0 },
+        { "raCode": "RA2", "percent": 100.0 }
+      ],
+      "instruments": [
+        {
+          "key": "I1",
+          "name": "Instrumento Valido Con Ejercicios",
+          "weightPercent": 100.0,
+          "raCodes": ["RA1", "RA2"],
+          "raDistributions": [
+            { "raCode": "RA1", "percent": 50.0 },
+            { "raCode": "RA2", "percent": 50.0 }
+          ],
+          "exerciseWeights": [
+            { "exerciseIndex": 1, "weightPercent": 60.0, "raCode": "RA1" },
+            { "exerciseIndex": 2, "weightPercent": 40.0, "raCode": "RA2" }
+          ]
+        }
+      ]
+    }
+  ],
+  "students": [
+    {
+      "studentCode": "A001",
+      "fullName": "Alumno 1",
+      "grades": [
+        {
+          "instrumentKey": "I1",
+          "gradeValue": 7.2,
+          "exerciseGrades": [
+            { "exerciseIndex": 1, "gradeValue": 8.0 },
+            { "exerciseIndex": 2, "gradeValue": 6.0 }
+          ]
+        }
+      ]
+    }
+  ]
+}

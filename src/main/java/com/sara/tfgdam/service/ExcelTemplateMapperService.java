@@ -630,9 +630,6 @@ public class ExcelTemplateMapperService {
             }
         }
 
-        // If the student has no assigned grade data in the template, treat as non-existent.
-        students.removeIf(student -> student.getGrades() == null || student.getGrades().isEmpty());
-
         return students;
     }
 

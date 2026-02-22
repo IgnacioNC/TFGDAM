@@ -1,0 +1,34 @@
+{
+  "module": {
+    "name": "Test Import Invalid 04",
+    "academicYear": "2025-2026",
+    "teacherName": "Docente Prueba"
+  },
+  "ras": [
+    { "code": "RA1", "name": "Resultado 1", "weightPercent": 60.0 },
+    { "code": "RA2", "name": "Resultado 2", "weightPercent": 40.0 }
+  ],
+  "uts": [
+    {
+      "key": "UT1",
+      "name": "UT1",
+      "evaluationPeriod": 1,
+      "raDistributions": [
+        { "raCode": "RA1", "percent": 100.0 },
+        { "raCode": "RA2", "percent": 100.0 }
+      ],
+      "instruments": [
+        {
+          "key": "I1",
+          "name": "Instrumento Invalido RA Dist",
+          "weightPercent": 100.0,
+          "raCodes": ["RA1", "RA2"],
+          "raDistributions": [
+            { "raCode": "RA1", "percent": 90.0 }
+          ]
+        }
+      ]
+    }
+  ],
+  "students": []
+}
