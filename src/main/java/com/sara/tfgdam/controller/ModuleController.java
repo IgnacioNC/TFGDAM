@@ -37,6 +37,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
@@ -55,6 +56,13 @@ public class ModuleController {
     private final CalculationService calculationService;
     private final ExcelTemplateExportService excelTemplateExportService;
     private final DtoMapper mapper;
+
+    @GetMapping
+    public List<ModuleResponse> getModules() {
+        return moduleSetupService.getModules().stream()
+                .map(mapper::toModuleResponse)
+                .toList();
+    }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
@@ -177,8 +185,10 @@ public class ModuleController {
     }
 
     @GetMapping("/export/template/filled")
-    public ResponseEntity<ByteArrayResource> exportFilledTemplateExcel() {
-        var exported = excelTemplateExportService.exportFilledTemplateExcel();
+    public ResponseEntity<ByteArrayResource> exportFilledTemplateExcel(
+            @RequestParam(name = "variant", defaultValue = "1") Integer variant
+    ) {
+        var exported = excelTemplateExportService.exportFilledTemplateExcel(variant);
 
         ContentDisposition disposition = ContentDisposition.attachment()
                 .filename(exported.filename())

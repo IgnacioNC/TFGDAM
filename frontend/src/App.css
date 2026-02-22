@@ -89,6 +89,10 @@ button[disabled] {
   flex-wrap: wrap;
 }
 
+.template-variant-select {
+  min-width: 170px;
+}
+
 .console {
   background: #0f172a;
   color: #e2e8f0;
