@@ -1,11 +1,40 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
+/**
+ * Librería de comunicación con el backend SARA.
+ *
+ * En modo Electron: obtiene la URL del backend desde el proceso principal (IPC).
+ * En modo web: usa VITE_API_BASE_URL o el proxy de Vite (/api).
+ */
+
+// Si estamos en Electron, el preload expone window.electronAPI
+const isElectron = typeof window !== 'undefined' && window.electronAPI?.isElectron === true
+
+// URL base de la API. En web se resuelve en tiempo de importación.
+// En Electron se resolverá de forma asíncrona (ver initApiBaseUrl).
+let _apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api'
+let _apiBaseUrlReady = false
+
+/**
+ * Inicializa la URL base del backend cuando estamos en Electron.
+ * Debe llamarse una vez al arrancar la app (por ejemplo en main.jsx).
+ */
+export async function initApiBaseUrl() {
+  if (isElectron) {
+    try {
+      const backendUrl = await window.electronAPI.getBackendUrl()
+      _apiBaseUrl = backendUrl || 'http://localhost:8080'
+    } catch {
+      _apiBaseUrl = 'http://localhost:8080'
+    }
+  }
+  _apiBaseUrlReady = true
+}
 
 export function getApiBaseUrl() {
-  return API_BASE_URL
+  return _apiBaseUrl
 }
 
 function buildApiUrl(path) {
-  return `${API_BASE_URL}${path}`
+  return `${_apiBaseUrl}${path}`
 }
 
 export function normalizeError(error, fallback) {
@@ -107,4 +136,12 @@ export async function apiDownload(path, { token, method = 'GET', body, headers }
     blob: await response.blob(),
     filename: resolveFileName(response),
   }
+}
+
+/**
+ * Indica si la app se está ejecutando dentro de Electron.
+ * Útil para mostrar/ocultar funcionalidades de escritorio.
+ */
+export function isRunningInElectron() {
+  return isElectron
 }

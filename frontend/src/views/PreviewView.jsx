@@ -60,13 +60,13 @@ function PreviewView({
     [modules],
   )
 
-  const ras = previewData?.ras || []
-  const uts = previewData?.uts || []
-  const utRaLinks = previewData?.utRaLinks || []
-  const activities = previewData?.activities || []
-  const instruments = previewData?.instruments || []
-  const students = previewData?.students || []
-  const grades = previewData?.grades || []
+  const ras = useMemo(() => previewData?.ras || [], [previewData])
+  const uts = useMemo(() => previewData?.uts || [], [previewData])
+  const utRaLinks = useMemo(() => previewData?.utRaLinks || [], [previewData])
+  const activities = useMemo(() => previewData?.activities || [], [previewData])
+  const instruments = useMemo(() => previewData?.instruments || [], [previewData])
+  const students = useMemo(() => previewData?.students || [], [previewData])
+  const grades = useMemo(() => previewData?.grades || [], [previewData])
 
   const sortedRas = useMemo(
     () => [...ras].sort((a, b) => compareNatural(a.code, b.code)),
@@ -187,16 +187,16 @@ function PreviewView({
       return
     }
 
-    const studentExists = sortedStudents.some((item) => String(item.id) === String(exerciseStudentId))
-    if (!studentExists) {
-      setExerciseStudentId(String(sortedStudents[0].id))
-    }
+    setExerciseStudentId((prev) => {
+      const exists = sortedStudents.some((item) => String(item.id) === String(prev))
+      return exists ? prev : String(sortedStudents[0].id)
+    })
 
-    const instrumentExists = sortedInstruments.some((item) => String(item.id) === String(exerciseInstrumentId))
-    if (!instrumentExists) {
-      setExerciseInstrumentId(String(sortedInstruments[0].id))
-    }
-  }, [sortedStudents, sortedInstruments, exerciseStudentId, exerciseInstrumentId])
+    setExerciseInstrumentId((prev) => {
+      const exists = sortedInstruments.some((item) => String(item.id) === String(prev))
+      return exists ? prev : String(sortedInstruments[0].id)
+    })
+  }, [sortedStudents, sortedInstruments])
 
   const sortedEvaluationReports = useMemo(
     () =>
