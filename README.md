@@ -37,6 +37,10 @@ Si la base esta vacia, se insertan datos demo automaticamente con `CommandLineRu
 
 Todas las rutas, salvo `POST /auth/login` y `POST /auth/google`, requieren `Authorization: Bearer <token>`.
 
+### CORS
+
+`SecurityConfig` permite cualquier puerto de `http://localhost` y `http://127.0.0.1` mediante `allowedOriginPatterns` (cubre vite dev `5173/5174/5175/...`, preview `4173` y Electron cargando desde dev server). Credenciales habilitadas.
+
 ## Endpoints principales
 
 ### Configuracion

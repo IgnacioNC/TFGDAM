@@ -17,7 +17,21 @@ npm run build
 npm run preview
 ```
 
-Por defecto, `npm run dev` publica en `http://localhost:5173`.
+Por defecto, `npm run dev` publica en `http://localhost:5173` (Vite auto-incrementa a 5174, 5175, etc. si el puerto esta ocupado).
+
+### Escritorio (Electron)
+
+```bash
+npm run electron:dev      # arranca electron en modo dev (usa vite dev server)
+npm run electron:preview  # build + electron
+npm run electron:build    # build + electron-builder (genera instalable)
+```
+
+Variables de entorno para Electron dev:
+
+- `VITE_DEV_URL` (default `http://localhost:5173`): URL del vite dev server que Electron carga.
+- `SARA_BACKEND_URL` (default `http://localhost:8080`): backend Spring Boot al que el proceso principal expone via IPC.
+- `ELECTRON_BUILD=true` en el build de Vite para que use `base: './'` (rutas relativas, necesario para `file://`).
 
 ## Configuracion API
 
@@ -89,12 +103,14 @@ VITE_GOOGLE_CLIENT_ID=tu-client-id.apps.googleusercontent.com
 
 ## Estructura relevante
 
-- `src/App.jsx`: estado global y flujo principal (navegacion por hash).
-- `src/lib/api.js`: wrapper de `fetch`, token y manejo de errores.
-- `src/views/LoginView.jsx`: login y registro opcional por configuracion.
-- `src/views/ModulesView.jsx`: selector y borrado de modulo.
-- `src/views/ImportView.jsx`: importacion PDF/XLSX y persistencia de RAs detectados.
-- `src/views/PreviewView.jsx`: tablas de vista previa y reportes.
+- `src/App.jsx`: routing con React Router (`/login`, `/dashboard`, `/gradebook`, `/course-config`, `/activities`) y `ProtectedRoute`.
+- `src/main.jsx`: entrypoint; llama `initApiBaseUrl()` antes de renderizar (resuelve URL backend via IPC en Electron).
+- `src/layouts/MainLayout.jsx`: layout compartido (navegacion lateral + outlet).
+- `src/pages/Login.jsx`: login con JWT.
+- `src/pages/Dashboard.jsx`, `pages/Gradebook.jsx`, `pages/CourseConfig.jsx`, `pages/Activities.jsx`: vistas principales.
+- `src/lib/api.js`: wrapper de `fetch`, token, manejo de errores y deteccion Electron (IPC).
+- `electron/main.cjs`: proceso principal de Electron (abre ventana, expone backend URL y dialog nativo).
+- `electron/preload.cjs`: bridge seguro (`contextBridge`) entre renderer y proceso principal.
 
 ## Notas
 
