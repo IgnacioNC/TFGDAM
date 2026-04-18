@@ -16,8 +16,22 @@ No se usa Flyway/Liquibase en este repo. El esquema se crea con JPA (`spring.jpa
 
 ## Arranque
 
-1. Levanta MySQL y crea credenciales (o usa las de defecto).
-2. Configura variables opcionales (Spring):
+1. Levanta MySQL y crea credenciales.
+2. Crea un `.env` en la raiz del proyecto a partir de `.env.example`.
+3. Ajusta al menos las credenciales de base de datos y el secreto JWT.
+
+Ejemplo minimo:
+
+```properties
+SARA_DB_URL=jdbc:mysql://localhost:3306/sara?createDatabaseIfNotExist=true&serverTimezone=UTC
+SARA_DB_USERNAME=root
+SARA_DB_PASSWORD=tu_password
+SARA_JWT_SECRET=tu_secreto_base64_largo
+```
+
+Alternativamente puedes exportar variables de entorno del sistema. El backend carga `.env` automaticamente con `spring.config.import`.
+
+4. Configura variables opcionales (Spring):
 
 ```bash
 export SPRING_DATASOURCE_URL='jdbc:mysql://localhost:3306/sara?createDatabaseIfNotExist=true&serverTimezone=UTC'
@@ -27,7 +41,7 @@ export SARA_GOOGLE_CLIENT_IDS='tu-client-id-web.apps.googleusercontent.com'
 # opcional: export SARA_GOOGLE_ALLOWED_DOMAIN='colegiomiralmonte.es'
 ```
 
-3. Ejecuta:
+5. Ejecuta:
 
 ```bash
 ./mvnw spring-boot:run

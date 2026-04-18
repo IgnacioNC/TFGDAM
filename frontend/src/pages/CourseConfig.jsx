@@ -213,7 +213,7 @@ export default function CourseConfig() {
                             <div className="relative group">
                                 <input
                                     type="file"
-                                    accept=".xlsx, .xls"
+                                    accept=".xlsx"
                                     ref={excelInputRef}
                                     onChange={(e) => handleFileUpload(e, 'excel')}
                                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed z-10"

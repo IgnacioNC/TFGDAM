@@ -1,0 +1,66 @@
+services:
+
+  sara-db:
+    image: mysql:8.0
+    container_name: sara-db
+    environment:
+      MYSQL_ROOT_PASSWORD: ${SARA_DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${SARA_DB_NAME:-sara}
+    volumes:
+      - sara-db-data:/var/lib/mysql
+    networks:
+      - sara-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${SARA_DB_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  sara-backend:
+    image: sara-backend:latest
+    container_name: sara-backend
+    environment:
+      SARA_DB_URL: jdbc:mysql://sara-db:3306/${SARA_DB_NAME:-sara}?createDatabaseIfNotExist=true&serverTimezone=UTC&useSSL=false&allowPublicKeyRetrieval=true
+      SARA_DB_USERNAME: root
+      SARA_DB_PASSWORD: ${SARA_DB_ROOT_PASSWORD}
+      SARA_JWT_SECRET: ${SARA_JWT_SECRET}
+      SARA_JWT_EXP_MS: ${SARA_JWT_EXP_MS:-3600000}
+      SARA_GOOGLE_CLIENT_IDS: ${SARA_GOOGLE_CLIENT_IDS:-}
+      SARA_GOOGLE_ALLOWED_DOMAIN: ${SARA_GOOGLE_ALLOWED_DOMAIN:-colegiomiralmonte.es}
+      SARA_RECAPTCHA_SECRET_KEY: ${SARA_RECAPTCHA_SECRET_KEY:-}
+      SARA_IMPORT_STORAGE_PATH: /app/storage/imports-ra
+      SARA_EXPORT_PYTHON_COMMAND: python3
+      SARA_EXPORT_SCRIPT_PATH: /app/scripts/export_backend_template.py
+      SARA_EXPORT_TEMPLATE_PATH: /app/storage/templates/source_template_unprotected.xlsx
+      SARA_EXPORT_FILLED_TEMPLATE_PATH: /app/storage/templates/source_template_rellenada_unprotected.xlsx
+      SARA_EXPORT_FILLED_TEMPLATE_PATH_2: /app/storage/templates/source_template_rellenada2_unprotected.xlsx
+      SARA_EXPORT_USE_IMPORT_SNAPSHOT: "true"
+      SARA_EXPORT_TIMEOUT_SECONDS: "120"
+    volumes:
+      - sara-imports:/app/storage/imports-ra
+    depends_on:
+      sara-db:
+        condition: service_healthy
+    networks:
+      - sara-network
+    restart: unless-stopped
+
+  sara-frontend:
+    image: sara-frontend:latest
+    container_name: sara-frontend
+    ports:
+      - "3002:80"
+    depends_on:
+      - sara-backend
+    networks:
+      - sara-network
+    restart: unless-stopped
+
+volumes:
+  sara-db-data:
+  sara-imports:
+
+networks:
+  sara-network:
+    driver: bridge

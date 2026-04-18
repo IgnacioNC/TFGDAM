@@ -17,6 +17,32 @@ const parseGradeInput = (value) => {
     return Number.isFinite(num) ? num : null;
 };
 
+const studentCodeCollator = new Intl.Collator('es', { numeric: true, sensitivity: 'base' });
+
+const compareStudentsByDefaultOrder = (a, b) => {
+    const aCode = String(a?.studentCode ?? '').trim();
+    const bCode = String(b?.studentCode ?? '').trim();
+
+    if (aCode || bCode) {
+        const codeComparison = studentCodeCollator.compare(aCode, bCode);
+        if (codeComparison !== 0) {
+            return codeComparison;
+        }
+    }
+
+    const aId = Number(a?.id ?? a?.studentId ?? Number.MAX_SAFE_INTEGER);
+    const bId = Number(b?.id ?? b?.studentId ?? Number.MAX_SAFE_INTEGER);
+    if (Number.isFinite(aId) && Number.isFinite(bId) && aId !== bId) {
+        return aId - bId;
+    }
+
+    return String(a?.fullName ?? a?.studentName ?? '').localeCompare(
+        String(b?.fullName ?? b?.studentName ?? ''),
+        'es',
+        { sensitivity: 'base' }
+    );
+};
+
 export default function Gradebook() {
     const [toast, setToast] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -98,12 +124,16 @@ export default function Gradebook() {
 
     // Derived states for rendering
     const students = useMemo(() => {
-        return [...(previewData?.students || [])].sort((a, b) => a.studentCode.localeCompare(b.studentCode));
+        return [...(previewData?.students || [])].sort(compareStudentsByDefaultOrder);
     }, [previewData]);
 
     const instruments = useMemo(() => {
         return [...(previewData?.instruments || [])].sort((a, b) => a.name.localeCompare(b.name));
     }, [previewData]);
+
+    const finalReportStudents = useMemo(() => {
+        return [...(finalReport?.students || [])].sort(compareStudentsByDefaultOrder);
+    }, [finalReport]);
 
     // Handlers
     const handleGradeChange = (studentId, instrumentId, val) => {
@@ -381,7 +411,7 @@ export default function Gradebook() {
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                {finalReport.students?.map((row, idx) => {
+                                                {finalReportStudents.map((row, idx) => {
                                                     const grade = Number(row.finalGrade);
                                                     const isPassed = grade >= 5;
                                                     return (

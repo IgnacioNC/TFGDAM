@@ -29,10 +29,13 @@ public class AuthService {
     private final AuthenticationManager authenticationManager;
     private final JwtTokenService jwtTokenService;
     private final GoogleTokenVerifierService googleTokenVerifierService;
+    private final RecaptchaVerificationService recaptchaVerificationService;
     private final UserAccountRepository userAccountRepository;
     private final PasswordEncoder passwordEncoder;
 
-    public LoginResponse login(LoginRequest request) {
+    public LoginResponse login(LoginRequest request, String remoteIp) {
+        recaptchaVerificationService.verifyLoginToken(request.getRecaptchaToken(), remoteIp);
+
         Authentication authentication = authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(
                         request.getEmail().trim().toLowerCase(),

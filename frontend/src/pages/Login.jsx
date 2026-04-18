@@ -1,34 +1,57 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { apiRequest } from '../lib/api';
+import ReCAPTCHA from 'react-google-recaptcha';
 import { LogIn, AlertCircle } from 'lucide-react';
+import { apiRequest } from '../lib/api';
+
+const recaptchaSiteKey = (import.meta.env.VITE_RECAPTCHA_SITE_KEY || '').trim();
 
 export default function Login() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [recaptchaToken, setRecaptchaToken] = useState('');
     const [error, setError] = useState(null);
     const [loading, setLoading] = useState(false);
+    const recaptchaRef = useRef(null);
     const navigate = useNavigate();
+
+    const recaptchaEnabled = recaptchaSiteKey.length > 0;
+
+    const resetRecaptcha = () => {
+        if (!recaptchaEnabled) return;
+        recaptchaRef.current?.reset();
+        setRecaptchaToken('');
+    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError(null);
-        setLoading(true);
 
+        if (recaptchaEnabled && !recaptchaToken) {
+            setError('Completa el reCAPTCHA antes de iniciar sesión.');
+            return;
+        }
+
+        setLoading(true);
         try {
             const response = await apiRequest('/auth/login', {
                 method: 'POST',
-                body: { email, password },
+                body: {
+                    email,
+                    password,
+                    recaptchaToken: recaptchaEnabled ? recaptchaToken : null,
+                },
             });
 
             if (response && response.accessToken) {
                 localStorage.setItem('sara_token', response.accessToken);
                 navigate('/dashboard');
-            } else {
-                throw new Error('No se recibió un token válido');
+                return;
             }
+            throw new Error('No se recibió un token válido');
         } catch (err) {
             setError(err.message || 'Error al iniciar sesión. Comprueba tus credenciales.');
+            resetRecaptcha();
         } finally {
             setLoading(false);
         }
@@ -66,7 +89,7 @@ export default function Login() {
 
                         <div>
                             <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-                                Correo Electrónico
+                                Correo electrónico
                             </label>
                             <div className="mt-1">
                                 <input
@@ -78,7 +101,7 @@ export default function Login() {
                                     className="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-[#9b1522] focus:border-[#9b1522] sm:text-sm transition-colors"
                                     value={email}
                                     onChange={(e) => setEmail(e.target.value)}
-                                    placeholder="admin@admin.com"
+                                    placeholder="admin@colegiomiralmonte.es"
                                 />
                             </div>
                         </div>
@@ -101,10 +124,25 @@ export default function Login() {
                             </div>
                         </div>
 
+                        {recaptchaEnabled && (
+                            <div className="rounded-lg border border-gray-200 bg-slate-50 p-4">
+                                <ReCAPTCHA
+                                    ref={recaptchaRef}
+                                    sitekey={recaptchaSiteKey}
+                                    onChange={(token) => setRecaptchaToken(token || '')}
+                                    onExpired={() => setRecaptchaToken('')}
+                                    onErrored={() => {
+                                        setRecaptchaToken('');
+                                        setError('No se pudo cargar reCAPTCHA. Inténtalo de nuevo.');
+                                    }}
+                                />
+                            </div>
+                        )}
+
                         <div>
                             <button
                                 type="submit"
-                                disabled={loading}
+                                disabled={loading || (recaptchaEnabled && !recaptchaToken)}
                                 className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-md text-sm font-medium text-white bg-[#9b1522] hover:bg-[#80101b] focus:ring-[#9b1522] disabled:opacity-70 disabled:cursor-not-allowed transition-all"
                             >
                                 {loading ? (

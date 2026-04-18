@@ -101,7 +101,7 @@ public class GoogleTokenVerifierService {
             }
             return body;
         } catch (RestClientException ex) {
-            throw new BusinessValidationException("Cannot validate Google token: " + ex.getMessage());
+            throw new BusinessValidationException("No se pudo validar el token de Google. Inténtalo de nuevo.");
         }
     }
 

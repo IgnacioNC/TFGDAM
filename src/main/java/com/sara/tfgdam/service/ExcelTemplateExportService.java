@@ -94,12 +94,14 @@ public class ExcelTemplateExportService {
 
         Path script = Paths.get(exportScriptPath).toAbsolutePath().normalize();
         if (!Files.exists(script)) {
-            throw new BusinessValidationException("Export script not found: " + script);
+            log.error("Export script not found: {}", script);
+            throw new BusinessValidationException("El script de exportación no está configurado correctamente en el servidor");
         }
 
         Path template = resolveTemplatePath(moduleId);
         if (!Files.exists(template)) {
-            throw new BusinessValidationException("Export template not found: " + template);
+            log.error("Export template not found: {}", template);
+            throw new BusinessValidationException("La plantilla de exportación no está disponible en el servidor");
         }
 
         Path outputFile = null;
@@ -134,9 +136,8 @@ public class ExcelTemplateExportService {
 
             String processOutput = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
             if (process.exitValue() != 0) {
-                throw new BusinessValidationException(
-                        "Excel export failed" + (processOutput.isEmpty() ? "" : ": " + processOutput)
-                );
+                log.error("Excel export failed for module {}: {}", moduleId, processOutput);
+                throw new BusinessValidationException("La exportación a Excel ha fallado. Comprueba que la plantilla es correcta.");
             }
 
             byte[] content = Files.readAllBytes(outputFile);

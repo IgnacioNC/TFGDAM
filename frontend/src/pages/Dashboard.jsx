@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Plus, Book, Trash2, AlertCircle, Loader2 } from 'lucide-react';
 import { apiRequest } from '../lib/api';
 import { useNavigate } from 'react-router-dom';
@@ -11,6 +11,7 @@ export default function Dashboard() {
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [newCourseName, setNewCourseName] = useState('');
     const [newCourseYear, setNewCourseYear] = useState('');
+    const [newTeacherName, setNewTeacherName] = useState('');
     const navigate = useNavigate();
 
     const fetchModules = async () => {
@@ -24,8 +25,8 @@ export default function Dashboard() {
             const data = await apiRequest('/modules', { token });
             setCourses(data || []);
         } catch (err) {
-            console.error("Error fetching modules", err);
-            setError(err.message || 'Error al cargar los módulos.');
+            console.error('Error fetching modules', err);
+            setError(err.message || 'Error al cargar los modulos.');
 
             if (err.message && (err.message.includes('401') || err.message.includes('Unauthorized'))) {
                 localStorage.removeItem('sara_token');
@@ -42,28 +43,39 @@ export default function Dashboard() {
 
     const handleCreateCourse = () => {
         setShowCreateModal(true);
+        setError(null);
     };
 
     const submitCreateCourse = async (e) => {
         e.preventDefault();
         if (!newCourseName.trim()) return;
+
         try {
             setLoading(true);
+            setError(null);
             const token = localStorage.getItem('sara_token');
+
             await apiRequest('/modules', {
                 method: 'POST',
                 token,
-                body: { name: newCourseName, academicYear: newCourseYear }
+                body: {
+                    name: newCourseName.trim(),
+                    academicYear: newCourseYear.trim(),
+                    teacherName: newTeacherName.trim() || 'Pendiente de asignar',
+                },
             });
-            setToast('Módulo creado correctamente');
+
+            setToast('Modulo creado correctamente');
             setTimeout(() => setToast(null), 3000);
             setShowCreateModal(false);
             setNewCourseName('');
             setNewCourseYear('');
+            setNewTeacherName('');
             fetchModules();
         } catch (err) {
             console.error(err);
-            setToast('Error al crear el módulo');
+            setError(err.message || 'Error al crear el modulo.');
+            setToast(err.message || 'Error al crear el modulo');
             setTimeout(() => setToast(null), 3000);
             setLoading(false);
         }
@@ -71,21 +83,19 @@ export default function Dashboard() {
 
     const handleDeleteModule = async (e, id, name) => {
         e.stopPropagation();
-        if (!window.confirm(`¿Estás seguro de que quieres eliminar el módulo "${name}" (${id}) y todos sus datos relacionados?`)) {
+        if (!window.confirm(`Estas seguro de que quieres eliminar el modulo "${name}" (${id}) y todos sus datos relacionados?`)) {
             return;
         }
 
         try {
             const token = localStorage.getItem('sara_token');
             await apiRequest(`/modules/${id}`, { method: 'DELETE', token });
-            setToast('Módulo eliminado correctamente');
+            setToast('Modulo eliminado correctamente');
             setTimeout(() => setToast(null), 3000);
-
-            // Reload the list
             fetchModules();
         } catch (err) {
             console.error(err);
-            setToast('Error al eliminar el módulo');
+            setToast(err.message || 'Error al eliminar el modulo');
             setTimeout(() => setToast(null), 3000);
         }
     };
@@ -94,19 +104,18 @@ export default function Dashboard() {
         return (
             <div className="flex h-full w-full items-center justify-center p-8">
                 <Loader2 className="h-8 w-8 animate-spin text-[#9b1522]" />
-                <span className="ml-3 text-lg font-medium text-gray-600">Cargando módulos...</span>
+                <span className="ml-3 text-lg font-medium text-gray-600">Cargando modulos...</span>
             </div>
         );
     }
 
     return (
         <div className="w-full h-full flex flex-col bg-slate-50">
-            {/* Miralmonte Style Hero Banner */}
             <div className="w-full bg-[#9b1522] text-white py-12 px-8 shadow-inner relative overflow-hidden shrink-0">
                 <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]" />
                 <div className="max-w-7xl mx-auto relative z-10">
-                    <h2 className="text-4xl font-light mb-2">Mis <span className="font-bold">Módulos</span></h2>
-                    <p className="text-red-100 text-sm tracking-wide">Colegio Miralmonte Cartagena &gt; SARA Académico &gt; Dashboard</p>
+                    <h2 className="text-4xl font-light mb-2">Mis <span className="font-bold">Modulos</span></h2>
+                    <p className="text-red-100 text-sm tracking-wide">Colegio Miralmonte Cartagena &gt; SARA Academico &gt; Dashboard</p>
                 </div>
             </div>
 
@@ -114,7 +123,7 @@ export default function Dashboard() {
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
                     <div>
                         <h2 className="text-3xl font-bold text-gray-900">Dashboard</h2>
-                        <p className="text-gray-500 mt-1">Bienvenido a SARA. Gestiona tus módulos y resultados de aprendizaje.</p>
+                        <p className="text-gray-500 mt-1">Bienvenido a SARA. Gestiona tus modulos y resultados de aprendizaje.</p>
                     </div>
                     <button
                         onClick={handleCreateCourse}
@@ -133,8 +142,8 @@ export default function Dashboard() {
                 ) : courses.length === 0 ? (
                     <div className="bg-white border-2 border-dashed border-gray-300 rounded-xl p-12 text-center">
                         <Book className="mx-auto h-12 w-12 text-gray-400" />
-                        <h3 className="mt-4 text-lg font-medium text-gray-900">No hay módulos definidos</h3>
-                        <p className="mt-2 text-sm text-gray-500">Crea tu primer módulo para comenzar a usar SARA.</p>
+                        <h3 className="mt-4 text-lg font-medium text-gray-900">No hay modulos definidos</h3>
+                        <p className="mt-2 text-sm text-gray-500">Crea tu primer modulo para comenzar a usar SARA.</p>
                     </div>
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -148,7 +157,7 @@ export default function Dashboard() {
                                     </div>
                                     <button
                                         onClick={(e) => handleDeleteModule(e, course.id, course.name)}
-                                        title="Eliminar Módulo"
+                                        title="Eliminar modulo"
                                         className="text-gray-400 hover:text-red-500 p-1 transition-colors z-10"
                                     >
                                         <Trash2 className="w-5 h-5" />
@@ -161,10 +170,11 @@ export default function Dashboard() {
 
                                 <div className="flex gap-4 text-sm text-gray-500 mt-4 flex-col sm:flex-row">
                                     <div className="flex items-center gap-1">
-                                        <span className="font-semibold text-gray-700">Prof:</span> <span className="truncate" title={course.teacherName}>{course.teacherName || 'No asignado'}</span>
+                                        <span className="font-semibold text-gray-700">Prof:</span>
+                                        <span className="truncate" title={course.teacherName}>{course.teacherName || 'No asignado'}</span>
                                     </div>
                                     <div className="flex items-center gap-1">
-                                        <span className="font-semibold text-gray-700">Año:</span> {course.academicYear}
+                                        <span className="font-semibold text-gray-700">Ano:</span> {course.academicYear}
                                     </div>
                                 </div>
                             </div>
@@ -180,32 +190,43 @@ export default function Dashboard() {
                         <p className="text-sm font-medium">{toast}</p>
                     </div>
                 )}
+
                 {showCreateModal && (
                     <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex flex-col items-center justify-center p-4">
                         <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full animate-in zoom-in-95">
-                            <h3 className="text-2xl font-bold text-gray-900 mb-2">Crear Nuevo Módulo</h3>
-                            <p className="text-gray-500 mb-6">Introduce los datos básicos del módulo para empezar a gestionarlo.</p>
+                            <h3 className="text-2xl font-bold text-gray-900 mb-2">Crear nuevo modulo</h3>
+                            <p className="text-gray-500 mb-6">Introduce los datos basicos del modulo para empezar a gestionarlo.</p>
 
                             <form onSubmit={submitCreateCourse} className="space-y-4">
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Nombre del Módulo</label>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Nombre del modulo</label>
                                     <input
                                         type="text"
                                         required
                                         value={newCourseName}
                                         onChange={(e) => setNewCourseName(e.target.value)}
                                         className="w-full border-gray-300 border rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-[#9b1522] focus:border-[#9b1522]"
-                                        placeholder="Ej: Programación Multimedia..."
+                                        placeholder="Ej: Programacion Multimedia"
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Año Académico</label>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Ano academico</label>
                                     <input
                                         type="text"
                                         value={newCourseYear}
                                         onChange={(e) => setNewCourseYear(e.target.value)}
                                         className="w-full border-gray-300 border rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-[#9b1522] focus:border-[#9b1522]"
-                                        placeholder="Ej: 2024-2025"
+                                        placeholder="Ej: 2025-2026"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Profesor responsable</label>
+                                    <input
+                                        type="text"
+                                        value={newTeacherName}
+                                        onChange={(e) => setNewTeacherName(e.target.value)}
+                                        className="w-full border-gray-300 border rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-[#9b1522] focus:border-[#9b1522]"
+                                        placeholder="Ej: Ana Docente"
                                     />
                                 </div>
                                 <div className="flex justify-end gap-3 mt-8">
@@ -220,7 +241,7 @@ export default function Dashboard() {
                                         type="submit"
                                         className="px-5 py-2.5 bg-[#9b1522] text-white font-medium hover:bg-[#80101b] rounded-lg transition-colors shadow-sm"
                                     >
-                                        Guardar Módulo
+                                        Guardar modulo
                                     </button>
                                 </div>
                             </form>

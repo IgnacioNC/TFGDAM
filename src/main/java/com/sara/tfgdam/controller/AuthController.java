@@ -4,6 +4,7 @@ import com.sara.tfgdam.dto.LoginRequest;
 import com.sara.tfgdam.dto.LoginResponse;
 import com.sara.tfgdam.dto.GoogleLoginRequest;
 import com.sara.tfgdam.service.AuthService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -19,8 +20,8 @@ public class AuthController {
     private final AuthService authService;
 
     @PostMapping("/login")
-    public LoginResponse login(@Valid @RequestBody LoginRequest request) {
-        return authService.login(request);
+    public LoginResponse login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
+        return authService.login(request, httpRequest.getRemoteAddr());
     }
 
     @PostMapping("/google")

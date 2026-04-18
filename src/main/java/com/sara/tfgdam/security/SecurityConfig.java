@@ -55,7 +55,8 @@ public class SecurityConfig {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOriginPatterns(List.of(
                 "http://localhost:*",      // Vite dev (5173/5174/5175/...) y preview (4173)
-                "http://127.0.0.1:*"
+                "http://127.0.0.1:*",
+                "https://sara.ncdevapps.top"
         ));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));

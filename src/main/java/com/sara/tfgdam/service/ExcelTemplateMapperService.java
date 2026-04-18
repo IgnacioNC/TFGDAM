@@ -269,15 +269,23 @@ public class ExcelTemplateMapperService {
             item.utKey = utKey.trim();
             item.evaluationPeriod = evaluation == null ? null : evaluation.intValue();
             item.weightPercent = scale2(totalWeight);
+            item.rawRaWeightsByCode = new LinkedHashMap<>(raDistributionsByCode);
             item.raCodes = raCodes.stream().map(String::trim).distinct().toList();
-            item.raDistributions = raDistributionsByCode.entrySet().stream()
-                    .map(entry -> {
-                        ExcelImportRequest.UTRADistributionItem distribution = new ExcelImportRequest.UTRADistributionItem();
-                        distribution.setRaCode(entry.getKey());
-                        distribution.setPercent(entry.getValue());
-                        return distribution;
-                    })
-                    .toList();
+            // The official template stores absolute RA weight contributions per activity row.
+            // The import payload, however, expects each instrument RA distribution normalized to 100%.
+            List<Map.Entry<String, BigDecimal>> distributionEntries = new ArrayList<>(raDistributionsByCode.entrySet());
+            List<BigDecimal> normalizedDistributionPercents = normalizePercentsToHundred(
+                    distributionEntries.stream().map(Map.Entry::getValue).toList()
+            );
+            List<ExcelImportRequest.UTRADistributionItem> distributions = new ArrayList<>();
+            for (int index = 0; index < distributionEntries.size(); index++) {
+                Map.Entry<String, BigDecimal> entry = distributionEntries.get(index);
+                ExcelImportRequest.UTRADistributionItem distribution = new ExcelImportRequest.UTRADistributionItem();
+                distribution.setRaCode(entry.getKey());
+                distribution.setPercent(normalizedDistributionPercents.get(index));
+                distributions.add(distribution);
+            }
+            item.raDistributions = distributions;
             rows.add(item);
         }
 
@@ -320,7 +328,8 @@ public class ExcelTemplateMapperService {
                 continue;
             }
 
-            List<ExcelImportRequest.ExerciseWeightItem> weights = new ArrayList<>();
+            List<ExerciseWeightSeed> weightSeeds = new ArrayList<>();
+            BigDecimal totalWeight = BigDecimal.ZERO;
             for (int offset = 1; offset <= 10; offset++) {
                 int col = startCol + offset;
                 BigDecimal value = getDecimal(actividades, ACT_ROW_WEIGHTS, col, evaluator, formatter);
@@ -336,10 +345,20 @@ public class ExcelTemplateMapperService {
                     );
                 }
 
+                totalWeight = totalWeight.add(value);
+                weightSeeds.add(new ExerciseWeightSeed(offset, value, resolvedRaCode));
+            }
+
+            List<BigDecimal> normalizedWeightPercents = normalizePercentsToHundred(
+                    weightSeeds.stream().map(seed -> seed.weightPercent).toList()
+            );
+            List<ExcelImportRequest.ExerciseWeightItem> weights = new ArrayList<>();
+            for (int index = 0; index < weightSeeds.size(); index++) {
+                ExerciseWeightSeed seed = weightSeeds.get(index);
                 ExcelImportRequest.ExerciseWeightItem item = new ExcelImportRequest.ExerciseWeightItem();
-                item.setExerciseIndex(offset);
-                item.setWeightPercent(scale2(value));
-                item.setRaCode(resolvedRaCode);
+                item.setExerciseIndex(seed.exerciseIndex);
+                item.setWeightPercent(normalizedWeightPercents.get(index));
+                item.setRaCode(seed.raCode);
                 weights.add(item);
             }
 
@@ -466,35 +485,57 @@ public class ExcelTemplateMapperService {
     private Map<String, List<ExcelImportRequest.UTRADistributionItem>> buildUTDistributionsFromActivities(
             List<ActivityRow> activityRows
     ) {
-        Map<String, Map<String, BigDecimal>> aggregate = new LinkedHashMap<>();
+        Map<String, Map<String, BigDecimal>> aggregateByUt = new LinkedHashMap<>();
         for (ActivityRow row : activityRows) {
-            if (isBlank(row.utKey) || row.raDistributions == null) {
+            if (isBlank(row.utKey) || row.rawRaWeightsByCode == null || row.rawRaWeightsByCode.isEmpty()) {
                 continue;
             }
-            Map<String, BigDecimal> byRaCode = aggregate.computeIfAbsent(normalize(row.utKey), ignored -> new LinkedHashMap<>());
-            for (ExcelImportRequest.UTRADistributionItem distribution : row.raDistributions) {
-                if (distribution == null || isBlank(distribution.getRaCode()) || distribution.getPercent() == null) {
+            Map<String, BigDecimal> byRaCode = aggregateByUt.computeIfAbsent(normalize(row.utKey), ignored -> new LinkedHashMap<>());
+            for (Map.Entry<String, BigDecimal> entry : row.rawRaWeightsByCode.entrySet()) {
+                if (isBlank(entry.getKey()) || entry.getValue() == null) {
                     continue;
                 }
                 byRaCode.merge(
-                        distribution.getRaCode().trim(),
-                        scale2(distribution.getPercent()),
+                        entry.getKey().trim(),
+                        scale2(entry.getValue()),
                         BigDecimal::add
                 );
             }
         }
 
         Map<String, List<ExcelImportRequest.UTRADistributionItem>> result = new LinkedHashMap<>();
-        for (var entry : aggregate.entrySet()) {
-            List<ExcelImportRequest.UTRADistributionItem> items = entry.getValue().entrySet().stream()
-                    .filter(item -> item.getValue().compareTo(BigDecimal.ZERO) > 0)
-                    .map(item -> {
-                        ExcelImportRequest.UTRADistributionItem dto = new ExcelImportRequest.UTRADistributionItem();
-                        dto.setRaCode(item.getKey());
-                        dto.setPercent(scale2(item.getValue()));
-                        return dto;
-                    })
-                    .toList();
+        Map<String, Map<String, BigDecimal>> normalizedByUt = new LinkedHashMap<>();
+        Map<String, List<Map.Entry<String, BigDecimal>>> rawValuesByRa = new LinkedHashMap<>();
+        for (Map.Entry<String, Map<String, BigDecimal>> utEntry : aggregateByUt.entrySet()) {
+            for (Map.Entry<String, BigDecimal> raEntry : utEntry.getValue().entrySet()) {
+                if (raEntry.getValue().compareTo(BigDecimal.ZERO) <= 0) {
+                    continue;
+                }
+                rawValuesByRa.computeIfAbsent(raEntry.getKey(), ignored -> new ArrayList<>())
+                        .add(Map.entry(utEntry.getKey(), raEntry.getValue()));
+            }
+        }
+
+        for (Map.Entry<String, List<Map.Entry<String, BigDecimal>>> raEntry : rawValuesByRa.entrySet()) {
+            List<Map.Entry<String, BigDecimal>> utValues = raEntry.getValue();
+            List<BigDecimal> normalizedPercents = normalizePercentsToHundred(
+                    utValues.stream().map(Map.Entry::getValue).toList()
+            );
+            for (int index = 0; index < utValues.size(); index++) {
+                String utKey = utValues.get(index).getKey();
+                normalizedByUt.computeIfAbsent(utKey, ignored -> new LinkedHashMap<>())
+                        .put(raEntry.getKey(), normalizedPercents.get(index));
+            }
+        }
+
+        for (Map.Entry<String, Map<String, BigDecimal>> entry : normalizedByUt.entrySet()) {
+            List<ExcelImportRequest.UTRADistributionItem> items = new ArrayList<>();
+            for (Map.Entry<String, BigDecimal> item : entry.getValue().entrySet()) {
+                ExcelImportRequest.UTRADistributionItem dto = new ExcelImportRequest.UTRADistributionItem();
+                dto.setRaCode(item.getKey());
+                dto.setPercent(item.getValue());
+                items.add(dto);
+            }
             result.put(entry.getKey(), items);
         }
         return result;
@@ -971,6 +1012,46 @@ public class ExcelTemplateMapperService {
         return value.setScale(2, RoundingMode.HALF_UP);
     }
 
+    private BigDecimal normalizeDistribution(BigDecimal value, BigDecimal total) {
+        if (value == null || total == null || total.compareTo(BigDecimal.ZERO) <= 0) {
+            return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        }
+        return value.multiply(ONE_HUNDRED).divide(total, 2, RoundingMode.HALF_UP);
+    }
+
+    private List<BigDecimal> normalizePercentsToHundred(List<BigDecimal> rawValues) {
+        if (rawValues == null || rawValues.isEmpty()) {
+            return List.of();
+        }
+
+        BigDecimal total = BigDecimal.ZERO;
+        for (BigDecimal value : rawValues) {
+            if (value != null && value.compareTo(BigDecimal.ZERO) > 0) {
+                total = total.add(value);
+            }
+        }
+
+        if (total.compareTo(BigDecimal.ZERO) <= 0) {
+            return rawValues.stream()
+                    .map(value -> BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP))
+                    .toList();
+        }
+
+        List<BigDecimal> normalized = new ArrayList<>(rawValues.size());
+        BigDecimal accumulated = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        for (int index = 0; index < rawValues.size(); index++) {
+            BigDecimal current;
+            if (index == rawValues.size() - 1) {
+                current = ONE_HUNDRED.subtract(accumulated).setScale(2, RoundingMode.HALF_UP);
+            } else {
+                current = normalizeDistribution(rawValues.get(index), total);
+                accumulated = accumulated.add(current).setScale(2, RoundingMode.HALF_UP);
+            }
+            normalized.add(current);
+        }
+        return normalized;
+    }
+
     private BigDecimal scale4(BigDecimal value) {
         return value.setScale(4, RoundingMode.HALF_UP);
     }
@@ -1009,7 +1090,20 @@ public class ExcelTemplateMapperService {
         private String utKey;
         private Integer evaluationPeriod;
         private BigDecimal weightPercent;
+        private Map<String, BigDecimal> rawRaWeightsByCode;
         private List<String> raCodes;
         private List<ExcelImportRequest.UTRADistributionItem> raDistributions;
+    }
+
+    private static final class ExerciseWeightSeed {
+        private final int exerciseIndex;
+        private final BigDecimal weightPercent;
+        private final String raCode;
+
+        private ExerciseWeightSeed(int exerciseIndex, BigDecimal weightPercent, String raCode) {
+            this.exerciseIndex = exerciseIndex;
+            this.weightPercent = weightPercent;
+            this.raCode = raCode;
+        }
     }
 }
