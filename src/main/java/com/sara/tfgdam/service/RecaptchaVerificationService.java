@@ -46,9 +46,6 @@ public class RecaptchaVerificationService {
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("secret", secretKey);
         form.add("response", token.trim());
-        if (remoteIp != null && !remoteIp.isBlank()) {
-            form.add("remoteip", remoteIp.trim());
-        }
 
         RecaptchaVerifyResponse response;
         try {
